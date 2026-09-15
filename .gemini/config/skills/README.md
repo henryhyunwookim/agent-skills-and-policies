@@ -35,7 +35,7 @@ flowchart TD
 | [`generate-workspace-readme`](./generate-workspace-readme/SKILL.md) | Adaptive Repository Documentation | • Reads & analyzes existing README first to preserve style, structure, & domain knowledge<br>• Classifies repo type (CLI, library, service, agent config, ML) when absent<br>• Drafts tailored, domain-relevant layouts instead of generic templates<br>• Integrates accurate facts, env configs, & tailored Mermaid diagrams |
 | [`safe-git-commit`](./safe-git-commit/SKILL.md) | Safe Commit & Git Hygiene | • Audits working tree to protect local-only files<br>• Enforces .gitignore updates before staging<br>• Runs sanity checks/tests before committing<br>• Crafts conventional commits & syncs upstream |
 | [`sequential-image-extractor`](./sequential-image-extractor/SKILL.md) | Multi-Image Content Synthesis | • Naturally sorts numbered screenshots/slides with `scripts/sort_images.py`<br>• Transcribes tables, code blocks, and lists with layout fidelity<br>• Compiles individual markdown files and a synthesized `summary.md` |
-| [`workspace-structure-organizer`](./workspace-structure-organizer/SKILL.md) | Codebase Architecture & Cleanup | • Detects root pollution & layout anti-patterns<br>• Reorganizes files safely using `git mv`<br>• Enforces idiomatic language layouts (Python, Node/TS, Go)<br>• Updates code imports and project configurations |
+| [`workspace-organizer`](./workspace-organizer/SKILL.md) | Workspace Architecture & Code Quality | • Detects root pollution & organizes folder hierarchy<br>• Enforces .gitignore hygiene & safe `git mv`<br>• Enriches scripts with missing headers, types, and comments<br>• Remediates outdated docstrings and drift |
 
 ---
 
@@ -67,11 +67,13 @@ Designed for processing ordered visual sequences (slide decks, document scans, t
 - **High-Fidelity Transcription**: Converts visual data into markdown tables, formatted code blocks, and structured text.
 - **Consolidated Synthesis**: Assembles an overview table of contents and high-level analytical summary.
 
-### 5. [`workspace-structure-organizer`](./workspace-structure-organizer/SKILL.md)
-Transforms messy, cluttered workspaces into standard, maintainable codebases:
-- **Root Cleanup**: Identifies misplaced scripts, scratch files, and loose test notebooks.
-- **Safe Refactoring**: Uses `git mv` to preserve commit history during file migrations.
-- **Import Integrity**: Updates relative and package imports when files are moved.
+### 5. [`workspace-organizer`](./workspace-organizer/SKILL.md)
+Transforms messy, cluttered workspaces into standard, maintainable codebases while improving script quality:
+- **Root Cleanup & Restructuring**: Identifies misplaced scripts, scratch files, and loose test notebooks; migrates files safely using `git mv`.
+- **Import & Path Integrity**: Updates relative and package imports and configurations when files are moved.
+- **Script & Code File Enrichment**: Audits scripts to add missing module headers, CLI usage docs, and inline comments for complex logic.
+- **Type Annotations & Signatures**: Enforces explicit typing across Python (PEP 484), TypeScript/JavaScript (JSDoc), and PowerShell (`[CmdletBinding()]` and parameter types).
+- **Documentation Drift Remediation**: Corrects outdated docstrings, stale parameter descriptions, and broken references.
 
 ---
 
