@@ -32,7 +32,7 @@ flowchart TD
 | Skill | Primary Focus | Key Capabilities |
 | :--- | :--- | :--- |
 | [`clone-github-repo`](./clone-github-repo/SKILL.md) | Remote Repository Ingestion | • Resolves GitHub/GitLab/SSH URLs & shorthand<br>• Pre-checks destination directories to avoid collision<br>• Detects landmark files (READMEs, manifests, configs)<br>• Proposes setup & environment initialization |
-| [`generate-workspace-readme`](./generate-workspace-readme/SKILL.md) | Autonomous Documentation | • Deeply analyzes workspace ecosystem & entry points<br>• Generates Mermaid architectural flowcharts<br>• Documents setup, environment variables, & scripts<br>• Avoids generic boilerplate in favor of real codebase facts |
+| [`generate-workspace-readme`](./generate-workspace-readme/SKILL.md) | Adaptive Repository Documentation | • Reads & analyzes existing README first to preserve style, structure, & domain knowledge<br>• Classifies repo type (CLI, library, service, agent config, ML) when absent<br>• Drafts tailored, domain-relevant layouts instead of generic templates<br>• Integrates accurate facts, env configs, & tailored Mermaid diagrams |
 | [`sequential-image-extractor`](./sequential-image-extractor/SKILL.md) | Multi-Image Content Synthesis | • Naturally sorts numbered screenshots/slides with `scripts/sort_images.py`<br>• Transcribes tables, code blocks, and lists with layout fidelity<br>• Compiles individual markdown files and a synthesized `summary.md` |
 | [`workspace-structure-organizer`](./workspace-structure-organizer/SKILL.md) | Codebase Architecture & Cleanup | • Detects root pollution & layout anti-patterns<br>• Reorganizes files safely using `git mv`<br>• Enforces idiomatic language layouts (Python, Node/TS, Go)<br>• Updates code imports and project configurations |
 
@@ -47,10 +47,11 @@ Enables seamless repository cloning directly from the chat interface without man
 - **Post-Clone Inspection**: Automatically parses project landmarks (`pyproject.toml`, `package.json`, `.env.example`) to present actionable onboarding steps.
 
 ### 2. [`generate-workspace-readme`](./generate-workspace-readme/SKILL.md)
-Generates comprehensive, production-grade `README.md` documentation tailored to the specific workspace:
-- **Ecosystem Auditing**: Scans package manifests, entry points (`main.py`, `app.ts`), and build scripts.
-- **Visual Process Flows**: Generates valid Mermaid diagrams to illustrate runtime and data flows.
-- **Configuration Clarity**: Extracts environment variables, prerequisite runtimes, and execution commands.
+Creates or refreshes high-quality, comprehensive `README.md` documentation tailored to the specific project:
+- **Existing README Analysis**: First parses existing README to preserve unique domain insights, custom sections, badges, and tone before updating stale details.
+- **Domain-Specific Classification**: When starting fresh, diagnoses the repo type (CLI tool, library/SDK, web app/API, agent config, data science/ML pipeline, monorepo) and crafts a layout specifically relevant to that project.
+- **Fact-Based Codebase Audit**: Verifies real commands, package manifests, and environment variables directly from source.
+- **Tailored Visual Diagrams**: Generates valid Mermaid process flows, architectures, or CLI lifecycles that match the repository domain.
 
 ### 3. [`sequential-image-extractor`](./sequential-image-extractor/SKILL.md)
 Designed for processing ordered visual sequences (slide decks, document scans, tutorial screenshots):
