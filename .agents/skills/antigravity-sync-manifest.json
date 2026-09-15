@@ -2,10 +2,10 @@
   "format": 1,
   "source": "C:\\Users\\hyunwookim\\.gemini\\config\\skills",
   "target": "C:\\Users\\hyunwookim\\.agents\\skills",
-  "synced_at_utc": "2026-09-15T05:25:08.3832600Z",
+  "synced_at_utc": "2026-09-15T05:37:22.4457941Z",
   "compatibility": {
-    "run_command": "run_in_terminal",
-    "view_file": "read_file"
+    "view_file": "read_file",
+    "run_command": "run_in_terminal"
   },
   "files": [
     {
@@ -35,7 +35,7 @@
     },
     {
       "path": "workspace-organizer/SKILL.md",
-      "source_sha256": "f3e112055c8627a50c5e0f4f3a88ce90b21ce58dccc47dcb495ebdd7076581a5",
+      "source_sha256": "94ac7fa1ad14ce3089237bf07eb49207084502cfc5d0d1547ef305277c988dfb",
       "copilot_path": "workspace-organizer/SKILL.md"
     }
   ]

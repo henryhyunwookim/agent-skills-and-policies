@@ -1,11 +1,11 @@
 ---
 name: workspace-organizer
-description: Organize and standardize workspace architecture, eliminate root clutter, maintain .gitignore hygiene, and enrich script and code files with missing or outdated documentation, comments, docstrings, and type annotations. Use when the user wants to clean up, restructure, organize files/folders, establish .gitignore rules, or improve script/code quality through documentation, typing, and comments across a workspace.
+description: Organize and standardize workspace architecture, eliminate root clutter, maintain .gitignore hygiene, and enrich script and code files with detailed step-by-step comments, architectural rationale, docstrings, and strict type annotations. Use when the user wants to clean up, restructure, organize files/folders, establish .gitignore rules, or improve script/code quality through documentation, deep commenting, typing, and docstrings across a workspace.
 ---
 
 # Workspace Organizer Skill
 
-Use this skill when the user asks to reorganize the directory layout of a workspace, establish clean project folder conventions, eliminate root clutter, maintain a robust `.gitignore`, or enrich script and code files with missing or outdated documentation, comments, docstrings, and type annotations.
+Use this skill when the user asks to reorganize the directory layout of a workspace, establish clean project folder conventions, eliminate root clutter, maintain a robust `.gitignore`, or enrich script and code files with detailed step-by-step comments, architectural rationale, docstrings, and strict type annotations.
 
 ## Execution Workflow
 
@@ -60,21 +60,21 @@ Formulate a clean, idiomatic structure based on ecosystem conventions:
 - Update configuration paths in CI/CD, Dockerfiles, entry point scripts, or test runners.
 
 ### 5. Script & Code File Enrichment (Documentation, Comments, & Types)
-When organizing a workspace or auditing scripts, systematically review all script and utility files (e.g., under `scripts/`, `tools/`, `bin/`, or project root) and core modules:
+When organizing a workspace or auditing scripts, systematically review all script and utility files (e.g., under `scripts/`, `tools/`, `bin/`, or project root) and core modules. Code should not merely be functional; it must be self-documenting, pedagogical, robustly typed, and thoroughly commented.
 
 #### A. File & Module Headers
 Ensure every standalone script and module begins with clear, high-level header documentation:
 - **Purpose**: What the script does in 1–2 clear, concise sentences.
-- **Usage / CLI Invocation**: Provide real command examples, expected arguments, and optional flags.
+- **Usage / CLI Invocation**: Provide real command examples, expected arguments, and optional flags (e.g., `python script.py --flag value`).
 - **Prerequisites & Dependencies**: Runtime requirements (e.g., Python version, PowerShell version, external CLIs, package dependencies).
-- **Inputs & Outputs**: Expected environment variables, input files, generated output artifacts or logs.
+- **Inputs & Outputs**: Expected environment variables, input files, generated output artifacts, caches, or logs.
 
 #### B. Type Annotations & Strict Signatures
 Enforce explicit, robust typing across all functions, methods, and parameters:
 - **Python**:
   - Add PEP 484 type hints for all parameters and return types (e.g., `def run_task(timeout: int = 30) -> list[str]:`).
   - Import necessary typing constructs (`from typing import Optional, Union, Callable, Any, Dict, List, Tuple`).
-  - For Python 3.10+ codebases, prefer standard built-in generics (`list[str]`, `dict[str, Any]`, `X | None`).
+  - For Python 3.10+ codebases, use `from __future__ import annotations` and prefer standard built-in generics (`list[str]`, `dict[str, Any]`, `X | None`).
 - **TypeScript / JavaScript**:
   - Enforce explicit TypeScript types and interfaces; eliminate untyped `any` parameters.
   - For plain JavaScript (`.js`, `.mjs`), add JSDoc `@param {Type}` and `@returns {Type}` annotations so editors and tools can infer types reliably.
@@ -91,9 +91,15 @@ Enforce explicit, robust typing across all functions, methods, and parameters:
 - Document public classes, functions, and methods following project conventions (Google style, Sphinx/reST, or JSDoc/TSDoc).
 - Clearly explain parameters, expected types, return structures, side effects, and potential exceptions or errors raised.
 
-#### D. Inline Comments & Logic Clarification
-- Add inline comments for non-trivial logic: regular expressions, platform-specific branching (Windows vs. macOS vs. Linux), external process invocations, and complex data structures.
-- Avoid obvious/redundant comments that merely repeat what the code says.
+#### D. Exhaustive Inline Comments & Pedagogical Logic Clarification
+Never leave non-trivial code blocks uncommented. Provide pervasive, high-clarity inline comments across all scripts:
+- **Visual Section Banners**: Group functions and logic into clear architectural zones using distinct banners (e.g., `# ===========================================================================`, `# ---------------------------------------------------------------------------` for constants, caching, core logic, API inference, helpers, CLI entrypoint).
+- **Sequential Step-by-Step Flow**: Number and document sequential pipeline stages (`# Step 1: Initialize local directory scaffolding`, `# Step 2: Ingest and validate cache`, `# Step 3: Compute embeddings`).
+- **Architectural & Design Rationale ("The Why")**: Explain *why* specific patterns or configurations are used (e.g., why `@st.cache_resource` is used to prevent model reloading; why REST transport is chosen; why specific batch sizes or smoothing constants like RRF $k=60$ are selected).
+- **Mathematical & Algorithmic Formulas**: For mathematical operations, vector calculations (e.g., $\ell_2$ normalization, cosine distance), heuristic scores, or regex patterns, explicitly write out the formula or mechanism in comments.
+- **Defensive & Fallback Logic**: In every `try/except` or conditional branch, explain why the error might occur, which specific exceptions are caught (e.g., distinguishing invalid auth credentials from transient HTTP 429 quota exhaustion), and what the fallback behavior achieves.
+- **UI & State Lifecycle Notes**: In frontend/interactive applications (Streamlit, React, Gradio, CLI prompts), document state persistence, session keys, event handlers, rerun triggers, and UI resets.
+- **Avoid Trivial Syntax Echoes**: Avoid comments that only restate primitive code (e.g., don't write `# set x to 1` above `x = 1`); instead explain the operational intent and business logic.
 
 #### E. Outdated Documentation Maintenance & Drift Correction
 - Check existing comments and docstrings against current implementations:
