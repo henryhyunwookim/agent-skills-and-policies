@@ -33,6 +33,7 @@ flowchart TD
 | :--- | :--- | :--- |
 | [`clone-github-repo`](./clone-github-repo/SKILL.md) | Remote Repository Ingestion | • Resolves GitHub/GitLab/SSH URLs & shorthand<br>• Pre-checks destination directories to avoid collision<br>• Detects landmark files (READMEs, manifests, configs)<br>• Proposes setup & environment initialization |
 | [`generate-workspace-readme`](./generate-workspace-readme/SKILL.md) | Adaptive Repository Documentation | • Reads & analyzes existing README first to preserve style, structure, & domain knowledge<br>• Classifies repo type (CLI, library, service, agent config, ML) when absent<br>• Drafts tailored, domain-relevant layouts instead of generic templates<br>• Integrates accurate facts, env configs, & tailored Mermaid diagrams |
+| [`safe-git-commit`](./safe-git-commit/SKILL.md) | Safe Commit & Git Hygiene | • Audits working tree to protect local-only files<br>• Enforces .gitignore updates before staging<br>• Runs sanity checks/tests before committing<br>• Crafts conventional commits & syncs upstream |
 | [`sequential-image-extractor`](./sequential-image-extractor/SKILL.md) | Multi-Image Content Synthesis | • Naturally sorts numbered screenshots/slides with `scripts/sort_images.py`<br>• Transcribes tables, code blocks, and lists with layout fidelity<br>• Compiles individual markdown files and a synthesized `summary.md` |
 | [`workspace-structure-organizer`](./workspace-structure-organizer/SKILL.md) | Codebase Architecture & Cleanup | • Detects root pollution & layout anti-patterns<br>• Reorganizes files safely using `git mv`<br>• Enforces idiomatic language layouts (Python, Node/TS, Go)<br>• Updates code imports and project configurations |
 
@@ -53,13 +54,20 @@ Creates or refreshes high-quality, comprehensive `README.md` documentation tailo
 - **Fact-Based Codebase Audit**: Verifies real commands, package manifests, and environment variables directly from source.
 - **Tailored Visual Diagrams**: Generates valid Mermaid process flows, architectures, or CLI lifecycles that match the repository domain.
 
-### 3. [`sequential-image-extractor`](./sequential-image-extractor/SKILL.md)
+### 3. [`safe-git-commit`](./safe-git-commit/SKILL.md)
+Enforces disciplined, safe Git commits with automated hygiene checks:
+- **Local Artifact Audit**: Detects secrets (`.env`, credentials), caches (`.pytest_cache/`, `__pycache__/`), dependencies, and local scratch files.
+- **Smart .gitignore First**: Automatically updates `.gitignore` to keep local-only files out of the repository before staging.
+- **Diff & Pre-Commit Verification**: Reviews changes and validates test suites before committing code.
+- **Conventional Commits**: Authors structured, descriptive commit messages with rationale and context.
+
+### 4. [`sequential-image-extractor`](./sequential-image-extractor/SKILL.md)
 Designed for processing ordered visual sequences (slide decks, document scans, tutorial screenshots):
 - **Natural Numeric Sorting**: Uses an included Python helper script (`scripts/sort_images.py`) ensuring `slide_2.png` sorts before `slide_10.png`.
 - **High-Fidelity Transcription**: Converts visual data into markdown tables, formatted code blocks, and structured text.
 - **Consolidated Synthesis**: Assembles an overview table of contents and high-level analytical summary.
 
-### 4. [`workspace-structure-organizer`](./workspace-structure-organizer/SKILL.md)
+### 5. [`workspace-structure-organizer`](./workspace-structure-organizer/SKILL.md)
 Transforms messy, cluttered workspaces into standard, maintainable codebases:
 - **Root Cleanup**: Identifies misplaced scripts, scratch files, and loose test notebooks.
 - **Safe Refactoring**: Uses `git mv` to preserve commit history during file migrations.
