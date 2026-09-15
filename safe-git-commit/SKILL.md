@@ -1,11 +1,43 @@
 ---
 name: safe-git-commit
-description: Commit and push changes to a Git repository safely with smart .gitignore hygiene. Audits working tree changes, identifies files that should remain local (secrets, caches, dependencies, scratch files), updates .gitignore first instead of blindly staging everything, runs sanity checks/tests, crafts conventional commit messages, and pushes upstream cleanly. Use whenever the user asks to commit, push, or save changes to git.
+description: Commit and push changes to a Git repository safely with smart .gitignore hygiene. Audits working tree changes, identifies files that should remain local (secrets, caches, local tests, dependencies, scratch files), updates .gitignore first instead of blindly staging everything, runs sanity checks/tests, crafts conventional commit messages, and pushes upstream cleanly. Use whenever the user asks to commit, push, or save changes to git.
 ---
 
 # Safe Git Commit & Smart Hygiene Skill
 
-Use this skill whenever committing and pushing changes in a Git repository. Rather than blindly executing `git add .` and `git push`, this workflow enforces strict safety gates: auditing the working tree, identifying local-only artifacts to add to `.gitignore`, verifying file diffs, performing pre-commit sanity checks, and authoring meaningful conventional commits.
+Use this skill whenever committing and pushing changes to a Git repository. Rather than blindly executing `git add .` or staging test suites and local files, this workflow enforces strict safety gates: auditing the working tree, identifying local-only artifacts (including local tests, test suites, secrets, caches, and scratch files), updating `.gitignore` first, verifying diffs, and authoring meaningful conventional commits.
+
+---
+
+## Safety Policy: What Must Stay Local
+
+> [!CAUTION]
+> **NEVER BLINDLY STAGE OR PUSH LOCAL ASSETS.**
+> Untracked files and local development artifacts must be added to `.gitignore` before any staging command is executed.
+> Specifically, local test suites (`tests/`, `test/`, `__tests__/`), test mocks, and ad-hoc test scripts MUST NOT be pushed to the remote repository unless the user explicitly requests committing tests.
+
+### Local-Only Artifact Blacklist
+
+The following categories must **always stay local** and be protected in `.gitignore`:
+
+1. **Local Tests, Test Suites & Mocks**:
+   - Directories: `tests/`, `test/`, `__tests__/`, `spec/`
+   - Files & patterns: `*.test.*`, `*.spec.*`, `test_*.py`, `*_test.py`, `conftest.py`
+   - Test data & databases: `test.db`, `*.sqlite3`, mock JSON/CSV test fixtures created for local verification
+2. **Secrets, API Keys & Credentials**:
+   - `.env`, `.env.local`, `.env.*.local`, `*.pem`, `*.key`, `*.token`, `credentials.json`, `token.json`, `service_account*.json`
+3. **Virtual Environments & Dependencies**:
+   - `.venv/`, `venv/`, `env/`, `ENV/`, `node_modules/`, `target/`, `vendor/`, `Pods/`
+4. **Caches, Build Outputs & Coverage Reports**:
+   - Python: `__pycache__/`, `*.py[cod]`, `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`, `htmlcov/`, `.coverage`, `dist/`, `build/`, `*.egg-info/`
+   - Web/Node: `.next/`, `.nuxt/`, `.turbo/`, `dist/`, `build/`, `out/`, `*.tsbuildinfo`
+   - General: `.cache/`, `*.log`, `tmp/`, `temp/`
+5. **OS & Editor Settings**:
+   - Windows: `Thumbs.db`, `ehthumbs.db`, `Desktop.ini`, `$RECYCLE.BIN/`
+   - macOS: `.DS_Store`, `.AppleDouble`, `.LSOverride`
+   - IDEs: `.vscode/`, `.idea/`, `*.swp`, `*.swo`, `*~`
+6. **Scratch & Ad-Hoc Scripts**:
+   - `scratch/`, `tmp_*.py`, `debug_*.py`, exploratory notebooks (`*.ipynb` unless core deliverable), local dump logs
 
 ---
 
@@ -13,90 +45,105 @@ Use this skill whenever committing and pushing changes in a Git repository. Rath
 
 ```mermaid
 flowchart TD
-    A["git status & Tree Audit"] --> B{"Local/Scratch Files Detected?"}
-    B -->|Yes| C["Update .gitignore & Untrack Local Files\n(git rm --cached if needed)"]
-    B -->|No| D["Review Diffs (git diff) & Run Sanity Tests"]
-    C --> D
-    D --> E["Intentional Staging (git add <targets>)"]
-    E --> F["Compose Conventional Commit Message"]
-    F --> G["git commit"]
-    G --> H["Sync Remote (git pull --rebase / git push)"]
-    H --> I["Post-Push Verification (git status)"]
+    A["git status -s & Tree Audit"] --> B{"Contains Local-Only Files?\n(tests/, secrets, caches, scratch)"}
+    B -->|Yes| C["Add Patterns to .gitignore First"]
+    C --> D{"Were Local Files Tracked Previously?"}
+    D -->|Yes| E["Untrack via git rm --cached -r <path>"]
+    D -->|No| F["Verify Ignored Status (git status --ignored)"]
+    E --> F
+    B -->|No| F
+    F --> G["Review Diffs (git diff) & Run Local Sanity Checks"]
+    G --> H["Selective Staging: Stage ONLY Production Code & Manifests\n(NEVER git add . blindly)"]
+    H --> I["Compose Conventional Commit Message"]
+    I --> J["git commit"]
+    J --> K["Sync Remote (git pull --rebase / git push)"]
+    K --> L["Post-Push Verification (git status)"]
 ```
 
 ---
 
-### 1. Working Tree Audit & Local Artifact Classification
+### Step 1: Working Tree Audit & Local Artifact Classification
 
-Run `git status` and `git status -s` using `run_command` to inspect all tracked, modified, and untracked files.
-
-Examine untracked or modified files to determine if any **must stay local** and **never** be pushed upstream:
-
-1. **Secrets, API Keys & Credentials**:
-   - `.env`, `.env.local`, `.env.*.local`, `*.pem`, `*.key`, `*.token`, `credentials.json`, `token.json`, `service_account*.json`.
-2. **Virtual Environments & Dependency Directories**:
-   - `.venv/`, `venv/`, `env/`, `ENV/`, `node_modules/`, `target/`, `vendor/`, `Pods/`.
-3. **Caches, Build Outputs & Generated Artifacts**:
-   - Python: `__pycache__/`, `*.py[cod]`, `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`, `htmlcov/`, `.coverage`, `dist/`, `build/`, `*.egg-info/`.
-   - Web/Node: `.next/`, `.nuxt/`, `.turbo/`, `dist/`, `build/`, `out/`, `*.tsbuildinfo`.
-   - General: `.cache/`, `*.log`, `tmp/`, `temp/`.
-4. **OS & IDE Metadata**:
-   - Windows: `Thumbs.db`, `ehthumbs.db`, `Desktop.ini`, `$RECYCLE.BIN/`.
-   - macOS: `.DS_Store`, `.AppleDouble`, `.LSOverride`.
-   - IDEs: `.vscode/` (unless team-shared tasks are strictly defined), `.idea/`, `*.swp`, `*.swo`.
-5. **Scratch & Local Experiment Files**:
-   - Scratch test scripts, temporary data files, test database dumps (`*.sqlite`, `*.db` if local), ad-hoc CSV/JSON downloads not part of project fixtures.
+1. Run `git status` and `git status -s` using `run_command` to inspect all tracked, modified, and untracked files.
+2. Check every untracked file and modified file against the **Local-Only Artifact Blacklist**.
+3. If any file belongs to the blacklist (especially `tests/`, test files, `.env`, caches, or local logs), flag it immediately for inclusion in `.gitignore`.
 
 ---
 
-### 2. Update `.gitignore` Before Staging
+### Step 2: Update `.gitignore` and Untrack Local Files
 
-If any files identified in Step 1 should remain local and are not already ignored:
+Before staging any files:
 
-1. **Check existing `.gitignore`**:
-   - If `.gitignore` does not exist in the repository root, create it.
-   - If it exists, read it with `view_file` to understand its existing sections.
-2. **Add Patterns Organically**:
-   - Append or insert the appropriate patterns under categorized headers (e.g., `# Secrets`, `# Virtual environments`, `# Caches & Build`, `# Local scratch`).
-   - Use folder wildcards where appropriate (e.g., `tmp/`, `*.log`, `.pytest_cache/`).
-3. **Handle Previously Tracked Local Files**:
-   - If a local-only file (e.g., `.env`, `.pytest_cache/`, `*.log`) was previously committed or staged by accident, remove it from the Git index without deleting the local file on disk:
-     ```powershell
-     git rm --cached -r <path>
+1. **Inspect `.gitignore`**:
+   - Read `.gitignore` using `view_file`. If it does not exist, create it.
+2. **Add Missing Patterns**:
+   - Append patterns under clean, dedicated headers:
+     ```gitignore
+     # Local tests & test artifacts
+     tests/
+     test/
+     __tests__/
+     *.test.*
+     *.spec.*
+
+     # Caches and build outputs
+     __pycache__/
+     .pytest_cache/
+     .coverage
+     htmlcov/
+
+     # Secrets and environment files
+     .env
+     *.pem
+     *.key
+     credentials.json
+     token.json
+
+     # Logs and temporary files
+     *.log
+     tmp/
+     temp/
      ```
-4. **Re-check Working Tree**:
-   - Run `git status` to verify that local-only files no longer appear as untracked files.
+3. **Untrack Accidentally Committed Local Files**:
+   - If any blacklisted file or folder (e.g., `tests/`, `.env`, caches) is already tracked in Git, remove it from the Git index without deleting the local file:
+     ```powershell
+     git rm -r --cached tests/
+     ```
+4. **Confirm Ignored Status**:
+   - Run `git status --ignored` to confirm that blacklisted items now appear under `Ignored files:` and NOT under `Changes to be committed:` or `Untracked files:`.
 
 ---
 
-### 3. Review Diffs & Run Sanity Checks
+### Step 3: Review Diffs & Run Sanity Checks
 
-1. **Inspect Code Diffs**:
+1. **Inspect Diffs**:
    - Run `git diff` on modified files.
    - Verify that:
-     - No accidental hardcoded secrets, test API keys, or machine-specific absolute file paths are present in code.
-     - Debugging statements (e.g., excessive `console.log`, `print(debug)`, breakpoints) are cleaned up or intentional.
-2. **Execute Local Verification Tests**:
-   - If automated tests or linting exist (e.g., `pytest`, `npm test`, `cargo test`, `go test`), run them to ensure working code before committing.
-   - If tests fail, do NOT commit broken code; resolve or report issues first.
+     - No accidental secrets, private tokens, or hardcoded local paths exist.
+     - Production code cleanly compiles/imports.
+2. **Execute Local Sanity Checks**:
+   - Run local tests (e.g., `pytest tests/`, `npm test`) to ensure code works properly locally.
+   - Verify that running tests does not regenerate untracked cache files outside `.gitignore`.
 
 ---
 
-### 4. Intentional Staging
+### Step 4: Selective & Intentional Staging
 
-Avoid indiscriminate `git add .` or `git add -A` when unfamiliar files exist:
-- Prefer staging specific files or directories:
-  ```powershell
-  git add .gitignore README.md src/ tests/
-  ```
-- If all untracked files have been thoroughly audited and verified as intentional project files, `git add .` is acceptable.
-- Verify staged changes with `git status`.
+> [!WARNING]
+> **DO NOT USE `git add .` OR `git add -A` BLINDLY.**
+> Blind staging risks adding untracked test files, scratch scripts, or temporary data.
+
+Stage only the explicit production files, manifests, and documentation:
+```powershell
+git add .gitignore README.md requirements.txt src/
+```
+Verify the staged index with `git status` to ensure that **only** intended production files are staged.
 
 ---
 
-### 5. Compose Conventional Commit Message
+### Step 5: Compose Conventional Commit Message
 
-Formulate clear, descriptive commit messages adhering to the Conventional Commits specification:
+Formulate clear, descriptive commit messages adhering to Conventional Commits:
 
 - **Format**:
   ```
@@ -106,40 +153,27 @@ Formulate clear, descriptive commit messages adhering to the Conventional Commit
   - Additional context, breaking changes, or references
   ```
 - **Allowed Types**:
-  - `feat`: A new user-facing feature or enhancement.
-  - `fix`: A bug fix.
-  - `refactor`: Code change that neither fixes a bug nor adds a feature.
-  - `test`: Adding missing tests or correcting existing tests.
-  - `docs`: Documentation only changes.
-  - `style`: Formatting, missing semicolons, whitespace changes.
-  - `chore`: Maintenance, updating dependencies, tooling, or `.gitignore`.
-- **Commit Command Execution**:
+  - `feat`: A new production feature or enhancement.
+  - `fix`: A bug fix in production code.
+  - `refactor`: Production code refactoring.
+  - `docs`: Documentation updates.
+  - `chore`: Maintenance, dependencies, tooling, or `.gitignore` hygiene.
+- **Execution**:
   ```powershell
   git commit -m "<type>: <concise summary>" -m "- <detail bullet 1>`n- <detail bullet 2>"
   ```
 
 ---
 
-### 6. Push Upstream & Final Verification
+### Step 6: Push Upstream & Final Verification
 
 1. **Check Remote and Upstream Tracking**:
    - Run `git branch -vv` to verify the current branch and upstream tracker.
-   - If the remote branch has upstream updates, pull first to avoid conflicts:
-     ```powershell
-     git pull --rebase origin <current-branch>
-     ```
+   - Rebase if needed: `git pull --rebase origin <current-branch>`.
 2. **Push Commit**:
-   - If upstream is configured:
-     ```powershell
-     git push
-     ```
-   - If upstream is not yet configured:
-     ```powershell
-     git push -u origin <current-branch>
-     ```
+   - `git push origin <current-branch>`.
 3. **Verify Clean Tree**:
-   - Run `git status` to ensure `Your branch is up to date` and `working tree clean`.
+   - Run `git status` to verify `Your branch is up to date` and `working tree clean`.
    - Provide the user with:
      - The commit hash and summary.
-     - List of committed files with clickable links.
-     - Any patterns added to `.gitignore` to protect their local files.
+     - Confirmation of files committed vs files protected in `.gitignore`.
