@@ -1,0 +1,42 @@
+{
+  "format": 1,
+  "source": "C:\\Users\\hyunwookim\\.gemini\\config\\skills",
+  "target": "C:\\Users\\hyunwookim\\.agents\\skills",
+  "synced_at_utc": "2026-09-15T02:51:01.1598314Z",
+  "compatibility": {
+    "run_command": "run_in_terminal",
+    "view_file": "read_file"
+  },
+  "files": [
+    {
+      "path": "clone-github-repo/SKILL.md",
+      "source_sha256": "d97ad641ae0e1463378d0f584a4d275a7af0263d4012aa8bb77c2b80f79e19fb",
+      "copilot_path": "clone-github-repo/SKILL.md"
+    },
+    {
+      "path": "generate-workspace-readme/SKILL.md",
+      "source_sha256": "cf68f1063da66523d8e01baec5f8e2a3089b3997883286924ede3a551c266953",
+      "copilot_path": "generate-workspace-readme/SKILL.md"
+    },
+    {
+      "path": "safe-git-commit/SKILL.md",
+      "source_sha256": "40dbe33b189bb51981fd48ef43806e80459fce910431d9ffb5cc096f4e56cac1",
+      "copilot_path": "safe-git-commit/SKILL.md"
+    },
+    {
+      "path": "sequential-image-extractor/SKILL.md",
+      "source_sha256": "d8dd08c46b72995850690a2bb3522090c8b1cd1704122be036f7adf19a68639c",
+      "copilot_path": "sequential-image-extractor/SKILL.md"
+    },
+    {
+      "path": "sequential-image-extractor/scripts/sort_images.py",
+      "source_sha256": "014be88e4ba5af9d352bdfa8234001fdde63f1a6842dceedf86e3a817ddae518",
+      "copilot_path": "sequential-image-extractor/scripts/sort_images.py"
+    },
+    {
+      "path": "workspace-structure-organizer/SKILL.md",
+      "source_sha256": "d44ab91c41ef4d60a5fb071bc5842bb45ae96440820a961a79c68548f3fb195f",
+      "copilot_path": "workspace-structure-organizer/SKILL.md"
+    }
+  ]
+}

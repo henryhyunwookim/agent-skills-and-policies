@@ -130,3 +130,19 @@ Antigravity discovers skills across two tiers:
 ## Repository Design Note
 
 Unlike standard application repositories, this repository does **not** include or require a `.gitignore`. All files herein are deliberate, curated markdown runbooks, documentation, and small utility scripts intended to be fully tracked and synchronized across environments.
+
+## GitHub Copilot Mirror
+
+The same skills are mirrored into the global GitHub Copilot registry at
+`%USERPROFILE%\.agents\skills\`. Run [`sync-to-copilot.ps1`](./sync-to-copilot.ps1)
+from PowerShell after changing a skill:
+
+```powershell
+./sync-to-copilot.ps1
+```
+
+The command writes `antigravity-sync-manifest.json` to the Copilot registry. Each
+entry records the source SHA-256 hash used for the last sync, so a later check can
+compare the current source hash with the manifest and reveal stale mirrors. The
+script also translates the Antigravity tool names `run_command` and `view_file`
+to Copilot's `run_in_terminal` and `read_file` names in mirrored Markdown files.
