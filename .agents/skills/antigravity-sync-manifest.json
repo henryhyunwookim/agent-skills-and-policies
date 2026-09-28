@@ -1,11 +1,11 @@
 {
   "format": 1,
-  "source": "C:\\Users\\hyunwookim\\.gemini\\config\\skills",
-  "target": "C:\\Users\\hyunwookim\\.agents\\skills",
-  "synced_at_utc": "2026-09-15T05:37:22.4457941Z",
+  "source": "C:\\Users\\hyunwookim\\skills\\.gemini\\config\\skills",
+  "target": "C:\\Users\\hyunwookim\\skills\\.agents\\skills",
+  "synced_at_utc": "2026-09-28T01:26:55.6245527Z",
   "compatibility": {
-    "view_file": "read_file",
-    "run_command": "run_in_terminal"
+    "run_command": "run_in_terminal",
+    "view_file": "read_file"
   },
   "files": [
     {
@@ -14,13 +14,18 @@
       "copilot_path": "clone-github-repo/SKILL.md"
     },
     {
+      "path": "cloud-deploy/SKILL.md",
+      "source_sha256": "569968f837fbb5133805a874ef70f16c357226f31f939798f84cb0654c493f5d",
+      "copilot_path": "cloud-deploy/SKILL.md"
+    },
+    {
       "path": "generate-workspace-readme/SKILL.md",
-      "source_sha256": "cf68f1063da66523d8e01baec5f8e2a3089b3997883286924ede3a551c266953",
+      "source_sha256": "db6407232e15aba5a4beaeb6eb764db69f74abda0c8bddc358b2d57f551e9d52",
       "copilot_path": "generate-workspace-readme/SKILL.md"
     },
     {
       "path": "safe-git-commit/SKILL.md",
-      "source_sha256": "40dbe33b189bb51981fd48ef43806e80459fce910431d9ffb5cc096f4e56cac1",
+      "source_sha256": "803e67202a80a907001f8d8945fee92e026ef4c4d017c46350d2e73d19ff5201",
       "copilot_path": "safe-git-commit/SKILL.md"
     },
     {
@@ -32,6 +37,16 @@
       "path": "sequential-image-extractor/scripts/sort_images.py",
       "source_sha256": "014be88e4ba5af9d352bdfa8234001fdde63f1a6842dceedf86e3a817ddae518",
       "copilot_path": "sequential-image-extractor/scripts/sort_images.py"
+    },
+    {
+      "path": "sync-skills/SKILL.md",
+      "source_sha256": "57c6dcd72b6635848efa89d2854880551524d0f27c74da0ff50969e80d5cd627",
+      "copilot_path": "sync-skills/SKILL.md"
+    },
+    {
+      "path": "sync-skills/scripts/sync_skills.ps1",
+      "source_sha256": "efc649d14a3b83bc3b92370223ebacf5ba4d70d8ebdbed4ad811da6f0809b75a",
+      "copilot_path": "sync-skills/scripts/sync_skills.ps1"
     },
     {
       "path": "workspace-organizer/SKILL.md",

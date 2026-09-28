@@ -11,6 +11,12 @@ Use this skill whenever committing and pushing changes to a Git repository. Rath
 
 ## Safety Policy: What Must Stay Local
 
+> [!IMPORTANT]
+> **DIRECT INVOCATION AUTHORIZATION**:
+> When this skill is directly or explicitly invoked by the user (such as via `/safe-git-commit`, "commit and push", "save changes to git", etc.), the invocation itself serves as explicit user permission and directive to stage, commit, and push.
+> The agent MUST execute the complete workflow end-to-end (auditing, updating `.gitignore` if needed, staging, committing with a conventional commit message, and pushing upstream) without halting to ask for extra confirmation or approval.
+
+
 > [!CAUTION]
 > **NEVER BLINDLY STAGE OR PUSH LOCAL ASSETS.**
 > Untracked files and local development artifacts must be added to `.gitignore` before any staging command is executed.
@@ -162,6 +168,8 @@ Formulate clear, descriptive commit messages adhering to Conventional Commits:
   ```powershell
   git commit -m "<type>: <concise summary>" -m "- <detail bullet 1>`n- <detail bullet 2>"
   ```
+  *(Note: When this skill is directly called by the user, proceed immediately with the commit—do not halt for additional confirmation).*
+
 
 ---
 
