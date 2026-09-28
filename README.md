@@ -1,285 +1,66 @@
-# Shared Agent Skills
+# Shared Agent Skills and Policies
 
-A centralized repository for maintaining and synchronizing curated, production-grade agent skills across two primary AI agent environments:
+This repository keeps reusable skills and shared global instructions for Google Antigravity, GitHub Copilot, Codex, and Claude Code. Each tool has one folder containing `skills/` and `policies/`. These are reviewable repository mirrors of machine-global files. Run the sync commands with PowerShell 7 (`pwsh`) from the repository root.
 
-- **Google Antigravity (AGY)**: Machine-global customizations stored in `C:\Users\hyunwookim\.gemini\config\skills` (using native tools like `run_command` and `view_file`).
-- **GitHub Copilot / CLI Agent**: Machine-global skills stored in `C:\Users\hyunwookim\.agents\skills` (using Copilot tools like `run_in_terminal` and `read_file`).
+| Tool | Repository skills | Repository policies | Global skills | Global policy |
+| :--- | :--- | :--- | :--- | :--- |
+| Antigravity | `antigravity/skills/` | `antigravity/policies/` | `~/.gemini/config/skills/` | `~/.gemini/config/AGENTS.md` and rules |
+| GitHub Copilot | `copilot/skills/` | `copilot/policies/` | `~/.agents/skills/` | `~/.copilot/copilot-instructions.md` |
+| Codex | `codex/skills/` | `codex/policies/` | `~/.codex/skills/` | `~/.codex/AGENTS.md` |
+| Claude Code | `claude/skills/` | `claude/policies/` | `~/.claude/skills/` | `~/.claude/CLAUDE.md` |
 
-Unlike conventional software repositories containing applications, packages, or services, this repository serves as a **Centralized Agent Skill Registry & Mirror**. It endows pair-programming agents with specialized operational workflows, multi-step procedures, and tool automation runbooks while managing cross-platform compatibility.
+## Sync
 
----
+Use [sync-skills-and-policies](copilot/skills/sync-skills-and-policies/SKILL.md) from the repository root:
 
-## Architecture & How It Works
-
-### Progressive Disclosure Model
-Both Antigravity and Copilot employ **Progressive Disclosure** to expand agent capabilities while conserving context window tokens:
-
-```mermaid
-flowchart TD
-    A["User Prompt / Coding Task"] --> B["Agent Engine\n(Antigravity / Copilot)"]
-    B --> C{"Skill Discovery\n(~/.gemini/config/skills/ or ~/.agents/skills/)"}
-    C -->|Reads YAML Frontmatter| D["Metadata Registry\n(name & description only)"]
-    D -->|Semantic Match / Slash Command| E["Progressive Disclosure:\nLoad Full SKILL.md"]
-    E --> F["Autonomous Workflow Execution"]
-    F --> G["Tool Orchestration:\n(Terminal Commands, File Inspection, Edits)"]
-    G --> H["Verified Outcome & Report"]
+```powershell
+pwsh -File copilot/skills/sync-skills-and-policies/scripts/sync.ps1 -Check
+pwsh -File copilot/skills/sync-skills-and-policies/scripts/sync.ps1 -Sync
 ```
 
-1. **Lightweight Discovery**: At session launch, the agent engine discovers all skills and registers only their `name` and `description` from the YAML frontmatter.
-2. **Progressive Disclosure**: When a user's prompt matches a skill's purpose or when a slash command is invoked, the agent dynamically pulls the full `SKILL.md` instructions into context.
-3. **Deterministic Orchestration**: The agent executes the multi-step runbook, coordinating native system and file tools to achieve verified, consistent results.
+Both commands cover skills **and** policies. `-Check` reports differences without writing. `-Sync` first mirrors Antigravity's global policy and updates the other three policy mirrors and global instructions, then reconciles Antigravity and Copilot skills and generates Codex and Claude skill copies. A global skill that differs from its repository mirror stops the skill phase; inspect the two copies and reconcile them before retrying. Policy updates may already have completed when that happens. The scripts do not run continuously or perform Git operations.
 
----
+For policies alone, add `-PoliciesOnly`. On another machine, after cloning or pulling the reviewed repository, install the repository policy into the four global locations with:
 
-## Dual-Environment Synchronization Architecture
-
-```mermaid
-flowchart TD
-    subgraph Local["Machine-Global Registries (Active Agent Roots)"]
-        AGY_LOCAL["Antigravity Global Root\n(~/.gemini/config/skills)"]
-        COP_LOCAL["GitHub Copilot Registry\n(~/.agents/skills)"]
-    end
-
-    subgraph Repo["Repository Mirrors (skills/)"]
-        direction TB
-        REPO_GEMINI[".gemini/config/skills/\n(Antigravity Source & Tools)"]
-        REPO_AGENTS[".agents/skills/\n(Copilot Compatible)"]
-        MANIFEST[".agents/skills/antigravity-sync-manifest.json"]
-    end
-
-    subgraph SyncEngine["Tool & Path Adaptation Engine"]
-        DIFF["sync_skills.ps1 / sync-to-copilot.ps1\n• Diff Detection & Interactive Gate\n• run_command ➔ run_in_terminal\n• view_file ➔ read_file\n• SHA-256 Manifest Verification"]
-    end
-
-    AGY_LOCAL <-->|Phase 1: Global Sync & Diff Gate| COP_LOCAL
-    AGY_LOCAL -->|Phase 2: Mirror Sync| REPO_GEMINI
-    COP_LOCAL -->|Phase 2: Mirror Sync| REPO_AGENTS
-    REPO_GEMINI -.-> DIFF
-    DIFF -.-> REPO_AGENTS
-    DIFF -.-> MANIFEST
+```powershell
+pwsh -File copilot/skills/sync-skills-and-policies/scripts/sync.ps1 -Sync -PoliciesOnly -PolicySource Repository
 ```
 
-| Environment | Machine Path | Primary Tools | Repo Mirror |
-| :--- | :--- | :--- | :--- |
-| **Google Antigravity** | `C:\Users\hyunwookim\.gemini\config\skills` | `run_command`, `view_file` | `.gemini/config/skills/` |
-| **GitHub Copilot** | `C:\Users\hyunwookim\.agents\skills` | `run_in_terminal`, `read_file` | `.agents/skills/` |
+The policy source is Antigravity's global `config/AGENTS.md`, any nonempty `GEMINI.md`, and `always_on` modular rules. The generated policies are bounded by `shared-agent-policy` markers, so other global instructions remain in place. `-PolicySource Repository` reverses the Antigravity policy copy direction; review local policy changes before using it. This sync covers text instructions; tool permissions and application settings remain tool specific.
 
----
+## Skills
 
-## Skills Catalog
+The seven skills are mirrored under each tool's `skills/` folder. Antigravity and Copilot global skills are the inputs for skill sync; Copilot's repository copies supply the Codex and Claude adapters. On a new machine, the repository policy command above installs policies, while skills need to be present in the global Antigravity and Copilot registries before running the full skill sync. The global synchronization manifest contains machine paths and timestamps and is not copied into the repository.
 
-| Skill | Primary Focus | .agents/skills (Copilot) | .gemini/config/skills (Antigravity) |
-| :--- | :--- | :---: | :---: |
-| [`clone-github-repo`](.agents/skills/clone-github-repo/SKILL.md) | Remote Repository Ingestion & Onboarding | [Copilot](.agents/skills/clone-github-repo/SKILL.md) | [Antigravity](.gemini/config/skills/clone-github-repo/SKILL.md) |
-| [`cloud-deploy`](.agents/skills/cloud-deploy/SKILL.md) | Universal Cloud Deployment & Service Updates | [Copilot](.agents/skills/cloud-deploy/SKILL.md) | [Antigravity](.gemini/config/skills/cloud-deploy/SKILL.md) |
-| [`generate-workspace-readme`](.agents/skills/generate-workspace-readme/SKILL.md) | Adaptive Repository Documentation & Auditing | [Copilot](.agents/skills/generate-workspace-readme/SKILL.md) | [Antigravity](.gemini/config/skills/generate-workspace-readme/SKILL.md) |
-| [`safe-git-commit`](.agents/skills/safe-git-commit/SKILL.md) | Disciplined Git Commits & .gitignore Hygiene | [Copilot](.agents/skills/safe-git-commit/SKILL.md) | [Antigravity](.gemini/config/skills/safe-git-commit/SKILL.md) |
-| [`sequential-image-extractor`](.agents/skills/sequential-image-extractor/SKILL.md) | Multi-Image Transcription & Natural Numerical Sorting | [Copilot](.agents/skills/sequential-image-extractor/SKILL.md) | [Antigravity](.gemini/config/skills/sequential-image-extractor/SKILL.md) |
-| [`sync-skills`](.agents/skills/sync-skills/SKILL.md) | Cross-Registry Synchronization & Drift Detection | [Copilot](.agents/skills/sync-skills/SKILL.md) | [Antigravity](.gemini/config/skills/sync-skills/SKILL.md) |
-| [`workspace-organizer`](.agents/skills/workspace-organizer/SKILL.md) | Workspace Architecture, Root Cleanup & Code Typing | [Copilot](.agents/skills/workspace-organizer/SKILL.md) | [Antigravity](.gemini/config/skills/workspace-organizer/SKILL.md) |
+Each skill has a `SKILL.md` with YAML `name` and `description` fields. The harness can use that metadata to discover the skill and read its full instructions when relevant. Some skills include a `scripts/` folder for supporting code.
 
----
+| Skill | Purpose |
+| :--- | :--- |
+| [clone-github-repo](copilot/skills/clone-github-repo/SKILL.md) | Clone and inspect a remote repository. |
+| [cloud-deploy](copilot/skills/cloud-deploy/SKILL.md) | Prepare and deploy an application to cloud hosting. |
+| [generate-workspace-readme](copilot/skills/generate-workspace-readme/SKILL.md) | Create or update repository documentation. |
+| [safe-git-commit](copilot/skills/safe-git-commit/SKILL.md) | Review, commit, and push Git changes. |
+| [sequential-image-extractor](copilot/skills/sequential-image-extractor/SKILL.md) | Extract ordered image content and compile a summary. |
+| [sync-skills-and-policies](copilot/skills/sync-skills-and-policies/SKILL.md) | Audit and synchronize skills and policies. |
+| [workspace-organizer](copilot/skills/workspace-organizer/SKILL.md) | Organize workspace files and improve code documentation. |
 
-## Detailed Skill Specifications
+OpenCode and Cursor may discover some global skill directories, but this repository does not maintain separate mirrors for them.
 
-### 1. [`clone-github-repo`](.gemini/config/skills/clone-github-repo/SKILL.md)
-Enables seamless repository cloning directly from the agent interface without manual terminal switching:
-- **URL Resolution**: Handles standard HTTPS, SSH, and shorthand `<owner>/<repo>` identifiers.
-- **Collision Protection**: Verifies destination folders beforehand to prevent accidental overwrites or aborts.
-- **Landmark Inspection**: Parses project landmarks (`pyproject.toml`, `package.json`, `.env.example`) to propose actionable onboarding steps.
+## Updating a skill
 
-### 2. [`cloud-deploy`](.gemini/config/skills/cloud-deploy/SKILL.md)
-Orchestrates end-to-end cloud deployments and revision updates with Google Cloud as default:
-- **Universal Workspaces**: Adapts to single-container apps, microservices, and full-stack setups (`backend/` + `frontend/`).
-- **Google Cloud Run First**: Targets Cloud Run containerized deployments with automatic `$PORT` handling and revision tracking.
-- **Mandatory Safety & Approval Gate**: Halts prior to cloud execution, presenting a clear Deployment Blueprint for explicit user confirmation.
-- **Live Health Probes**: Automatically checks live service URLs, HTTP status codes, and runtime logs post-deployment.
+Edit the appropriate machine-global Antigravity or Copilot skill, then run `-Check` and inspect any reported difference before running `-Sync`. The sync helper translates Antigravity tool names such as `run_command` and `view_file` for Copilot, while the Codex and Claude adapter generates their copies from Copilot. Review the four repository mirrors before committing them. Keep scripts beside the skill that uses them.
 
-### 3. [`generate-workspace-readme`](.gemini/config/skills/generate-workspace-readme/SKILL.md)
-Creates or refreshes high-quality, comprehensive `README.md` documentation tailored to the specific project:
-- **Existing README Analysis**: Parses existing documentation first to preserve domain insights, custom sections, badges, and tone before updating stale details.
-- **Domain-Specific Classification**: Diagnoses repository type (CLI tool, library/SDK, web app/API, agent config, ML pipeline) and crafts a relevant layout rather than using a generic template.
-- **Fact-Based Codebase Audit**: Verifies real commands, package manifests, and environment variables directly from source.
-- **Tailored Visual Diagrams**: Generates valid Mermaid process flows, architectures, or CLI lifecycles matching the project domain.
-
-### 4. [`safe-git-commit`](.gemini/config/skills/safe-git-commit/SKILL.md)
-Enforces disciplined, safe Git commits with automated hygiene checks:
-- **Local Artifact Audit**: Detects secrets (`.env`, credentials), caches (`.pytest_cache/`, `__pycache__/`), and local scratch files.
-- **Smart .gitignore First**: Automatically updates `.gitignore` to keep local-only files out of the repository before staging.
-- **Diff & Pre-Commit Verification**: Reviews changes and validates test suites before committing code.
-- **Conventional Commits**: Authors structured, descriptive commit messages with rationale and context.
-
-### 5. [`sequential-image-extractor`](.gemini/config/skills/sequential-image-extractor/SKILL.md)
-Processes ordered visual sequences (slide decks, document scans, tutorial screenshots):
-- **Natural Numeric Sorting**: Uses an included Python helper script (`scripts/sort_images.py`) ensuring `slide_2.png` sorts before `slide_10.png`.
-- **High-Fidelity Transcription**: Converts visual data into markdown tables, formatted code blocks, and structured text.
-- **Consolidated Synthesis**: Assembles individual transcribed markdown files and a synthesized `summary.md`.
-
-### 6. [`sync-skills`](.gemini/config/skills/sync-skills/SKILL.md)
-Provides two-way alignment and verification across machine-global registries and workspace repository mirrors:
-- **Pre-Sync Audit & Diff Gate**: Checks differences across Antigravity and Copilot registries, displaying unified diffs when conflicting edits exist.
-- **Cross-Environment Translation**: Automatically adapts tool call signatures between Antigravity (`run_command`, `view_file`) and Copilot (`run_in_terminal`, `read_file`).
-- **Workspace Mirror Alignment**: Synchronizes the repository's `.gemini/config/skills` and `.agents/skills` trees directly from machine-global directories with stale file pruning.
-- **Integrity Manifest**: Maintains `antigravity-sync-manifest.json` with SHA-256 hashes to verify sync status.
-
-### 7. [`workspace-organizer`](.gemini/config/skills/workspace-organizer/SKILL.md)
-Transforms messy, cluttered workspaces into standard, maintainable codebases while improving script quality:
-- **Root Cleanup & Restructuring**: Identifies misplaced scripts, scratch files, and loose test notebooks; migrates files safely using `git mv`.
-- **Import & Path Integrity**: Updates relative and package imports and configurations when files are moved.
-- **Script & Code File Enrichment**: Audits scripts to add missing module headers, CLI usage docs, and inline comments for complex logic.
-- **Type Annotations & Signatures**: Enforces explicit typing across Python (PEP 484), TypeScript/JavaScript (JSDoc), and PowerShell (`[CmdletBinding()]` and parameter types).
-- **Documentation Drift Remediation**: Corrects outdated docstrings, stale parameter descriptions, and broken references.
-
----
-
-## Repository Structure
-
-```text
-skills/
-├── .agents/
-│   └── skills/
-│       ├── antigravity-sync-manifest.json      # SHA-256 sync verification manifest
-│       ├── clone-github-repo/                  # Git repository cloning workflow
-│       ├── cloud-deploy/                       # Google Cloud deployment orchestrator
-│       ├── generate-workspace-readme/          # Adaptive README generator & auditor
-│       ├── safe-git-commit/                    # Git hygiene & pre-commit audit
-│       ├── sequential-image-extractor/         # Screenshot sequence transcription
-│       │   └── scripts/sort_images.py          # Natural numeric sorting utility
-│       ├── sync-skills/                        # Cross-registry & workspace sync
-│       │   └── scripts/sync_skills.ps1         # Two-way sync & drift detection script
-│       └── workspace-organizer/                # Root hygiene & code typing enrichment
-├── .gemini/
-│   └── config/
-│       └── skills/
-│           ├── sync-to-copilot.ps1             # Tool adapter and mirror generator
-│           ├── clone-github-repo/
-│           ├── cloud-deploy/
-│           ├── generate-workspace-readme/
-│           ├── safe-git-commit/
-│           ├── sequential-image-extractor/
-│           │   └── scripts/sort_images.py
-│           ├── sync-skills/
-│           │   └── scripts/sync_skills.ps1
-│           └── workspace-organizer/
-└── README.md                                   # Consolidated repository & skill registry documentation
-```
-
----
-
-## Skill Anatomy & Authoring Guidelines
-
-Every skill in this repository follows the standard specification:
-
-```text
-skills/
-└── <skill-name>/
-    ├── SKILL.md                 # Required: YAML Frontmatter + Step-by-step instructions
-    ├── scripts/                 # Optional: Helper utilities executed during the workflow
-    ├── references/              # Optional: Reference documentation or cheat sheets
-    └── examples/                # Optional: Concrete examples and templates
-```
-
-### `SKILL.md` Structure
+When adding a skill, create a folder named after the skill in the relevant global registry and include a `SKILL.md` file:
 
 ```markdown
 ---
-name: your-skill-name
-description: Clear, concise description explaining when and why the agent should activate this skill.
+name: example-skill
+description: Explain when this skill should be used.
 ---
 
-# Your Skill Name
+# Example Skill
 
-Brief statement of purpose and trigger conditions.
-
-## Workflow
-
-### 1. Step One: Inspection & Pre-conditions
-- Specific instructions and tool call conventions...
-
-### 2. Step Two: Execution
-- Concrete execution steps, handling edge cases...
-
-### 3. Step Three: Verification & Reporting
-- How to verify results and report them back to the user.
+Describe the workflow and how to verify its result.
 ```
 
----
-
-## Deployment & Discovery Scope
-
-Skills operate across two tiers of discovery:
-
-1. **Global Customizations (`~/.gemini/config/skills/` and `~/.agents/skills/`)**:
-   - Machine-wide installations.
-   - Available across **all projects and workspaces** opened in Antigravity or GitHub Copilot on this machine.
-2. **Workspace Customizations (`.agents/skills/` or `.gemini/config/skills/`)**:
-   - Project-specific skills committed directly to individual project repositories.
-   - Take precedence over global skills in the event of a naming conflict.
-
----
-
-## Synchronization Workflows
-
-### Method 1: Automated Sync via `sync-skills` (Recommended)
-
-The [`sync-skills`](.gemini/config/skills/sync-skills/SKILL.md) workflow provides end-to-end drift detection, diff inspection, and safe bidirectional synchronization:
-
-```powershell
-# Step 1: Pre-sync audit (check differences and drift without modifying files)
-pwsh -File ".gemini\config\skills\sync-skills\scripts\sync_skills.ps1" -CheckOnly -ShowDiff
-
-# Step 2: Synchronize machine-global registries (Antigravity <-> Copilot)
-pwsh -File ".gemini\config\skills\sync-skills\scripts\sync_skills.ps1" -SyncGlobal
-
-# Step 3: Synchronize repository workspace mirrors from machine-global registries
-pwsh -File ".gemini\config\skills\sync-skills\scripts\sync_skills.ps1" -SyncWorkspace
-```
-
-> [!NOTE]
-> If a shared skill has conflicting manual edits between Antigravity and Copilot, the script halts with `[DIFF DETECTED]` and outputs a unified diff. Resolve the conflict or specify `-Direction AgyToCop` / `-Direction CopToAgy` with `-Force`.
-
----
-
-### Method 2: Manual Sync Fallback
-
-If running commands directly in PowerShell without the automated script:
-
-```powershell
-$repo = 'C:\Users\hyunwookim\skills'
-$antigravity = 'C:\Users\hyunwookim\.gemini\config\skills'
-$copilot = 'C:\Users\hyunwookim\.agents\skills'
-
-# Clean existing workspace mirrors (excluding .git)
-Get-ChildItem -LiteralPath (Join-Path $repo '.agents\skills') -Force |
-    Remove-Item -Recurse -Force
-Get-ChildItem -LiteralPath (Join-Path $repo '.gemini\config\skills') -Force |
-    Where-Object Name -ne '.git' |
-    Remove-Item -Recurse -Force
-
-# Copy from machine-global registries into workspace mirrors
-Get-ChildItem -LiteralPath $copilot -Force |
-    Copy-Item -Destination (Join-Path $repo '.agents\skills') -Recurse -Force
-Get-ChildItem -LiteralPath $antigravity -Force |
-    Where-Object Name -ne '.git' |
-    Copy-Item -Destination (Join-Path $repo '.gemini\config\skills') -Recurse -Force
-```
-
----
-
-## Verify Before Commit
-
-Compare relative file lists and SHA-256 hashes for each source and target pair. At minimum, confirm that:
-
-- Every source file has a matching repository file.
-- No repository file exists only in the target.
-- Hash mismatches are zero (`pwsh -File .gemini/config/skills/sync-to-copilot.ps1 -Check`).
-- No path contains a nested `.git` directory or ephemeral cache.
-
-Inspect the repository status:
-
-```powershell
-git -C C:\Users\hyunwookim\skills status --short
-git -C C:\Users\hyunwookim\skills diff --cached --name-only
-```
-
-Only the two maintained trees and intentionally changed documentation should be staged.
+Run `-Check` again after synchronization to confirm the global and repository copies agree. Review `git status` and the diff before staging; policy and skill sync do not commit files automatically.

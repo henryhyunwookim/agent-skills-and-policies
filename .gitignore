@@ -1,0 +1,64 @@
+# Local synchronization state
+**/antigravity-sync-manifest.json
+
+# Secrets and machine credentials
+.env
+.env.*
+*.pem
+*.key
+*.token
+credentials.json
+token.json
+service_account*.json
+
+# Local tests and scratch files
+tests/
+test/
+__tests__/
+spec/
+scratch/
+tmp/
+temp/
+*.test.*
+*.spec.*
+test_*.py
+*_test.py
+conftest.py
+
+# Dependencies, build output, and caches
+.venv/
+venv/
+env/
+ENV/
+node_modules/
+target/
+vendor/
+Pods/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+.next/
+.nuxt/
+.turbo/
+out/
+*.tsbuildinfo
+.cache/
+*.log
+
+# OS and editor state
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
