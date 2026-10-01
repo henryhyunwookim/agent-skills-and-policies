@@ -20,13 +20,10 @@ On another machine, clone or pull the reviewed repository and run `sync.ps1 -Syn
 
 Skill sync stops on a global/repository conflict. Review and reconcile it before retrying.
 
-## Commit after synchronization
+## Automatic commit after synchronization
 
-Direct invocation of this skill in the current prompt authorizes synchronization followed by a local Git commit in the shared skills repository as the workflow's terminal step. Authorization applies only to that invocation. An audit-only request (`-Check`) never stages or commits. Implicit skill selection requires an explicit commit instruction before staging.
+When this skill is explicitly invoked, run `-Sync`; the script verifies synchronization and automatically stages and commits the synchronized policy and skill files in the shared skills repository before reporting success. This is a required terminal step authorized by the current invocation. Do not stop after updating files. An audit-only request runs `-Check`, which never stages or commits. Implicit skill selection requires an explicit commit instruction before running `-Sync`.
 
-1. Record the skills repository's initial Git status. After successful synchronization, run `-Check` with the same scope and policy source; resolve any remaining drift before committing.
-2. Review the diff and new files, check `.gitignore` hygiene, and exclude credentials, local manifests, caches, tests, and scratch artifacts. Include reviewed policy and skill changes involved in synchronization, including pending changes from an earlier sync; leave unrelated pre-existing edits and staged changes untouched. If unrelated staged changes prevent an isolated commit, stop and report the conflict.
-3. Run `git diff --check`, selectively stage the reviewed synchronization files, and inspect the staged diff. Commit with a descriptive Conventional Commit message such as `chore(sync): synchronize shared skills and policies`. If there are no relevant changes, report that no commit was needed.
-4. Verify Git status and report the commit hash, summary, and any remaining unrelated changes. Do not push unless the current prompt explicitly requests a push.
+Before running, review pending changes in the synchronization scope and `.gitignore` hygiene. Exclude credentials, local manifests, caches, tests, and scratch artifacts. The script refuses existing staged changes and limits staging to the selected policy/skill directories; unrelated changes outside those directories remain untouched. Failed synchronization, verification, or commits must be reported as incomplete. A no-change sync reports that no commit was needed.
 
-The agent performs this Git step after the synchronization script succeeds; standalone script execution does not commit automatically.
+Report the commit hash and any remaining unrelated changes. Push only when the current prompt explicitly requests it, and only after a successful commit. Standalone `sync.ps1 -Sync` also commits automatically; `-PoliciesOnly` limits both synchronization and commit scope to policies.

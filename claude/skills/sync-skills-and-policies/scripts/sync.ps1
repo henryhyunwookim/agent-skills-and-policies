@@ -196,6 +196,20 @@ function Assert-NoWorkspaceConflicts {
     }
 }
 
+# Validate the commit target before changing any synchronized files.
+if ($Sync) {
+    foreach ($harness in @('antigravity', 'copilot', 'codex', 'claude')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot $harness) -PathType Container)) {
+            throw "Not a shared skills repository: missing $harness in $RepoRoot"
+        }
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot '.gitignore'))) {
+        throw 'A reviewed .gitignore is required before automatic commits.'
+    }
+    $staged = @(git -C $RepoRoot diff --cached --name-only)
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect the Git index.' }
+    if ($staged.Count -gt 0) { throw 'Existing staged changes must be reconciled before synchronization.' }
+}
 $hasDrift = $false
 if ($PoliciesOnly -or $Sync -or $Check) {
     if ($Sync) { Transfer-PolicySnapshot -ToRepository:($PolicySource -eq 'Antigravity') }
@@ -217,8 +231,47 @@ if (-not $PoliciesOnly) {
             $hasDrift = $true
         }
         & pwsh -NoProfile -File $legacy -CheckOnly -ShowDiff -RepoRoot $RepoRoot
+        if ($LASTEXITCODE -ne 0) { $hasDrift = $true }
         & pwsh -NoProfile -File $mirrors -Check -RepoRoot $RepoRoot
         if ($LASTEXITCODE -ne 0) { $hasDrift = $true }
     }
 }
 if ($hasDrift) { exit 1 }
+
+# A successful -Sync includes verification and a local commit; -Check stays read-only.
+if ($Sync) {
+    $verification = @('-NoProfile', '-File', (Join-Path $PSScriptRoot 'sync.ps1'), '-Check', '-RepoRoot', $RepoRoot,
+        '-PolicySource', $PolicySource, '-AntigravityPolicy', $AntigravityPolicy,
+        '-AntigravityGemini', $AntigravityGemini, '-AntigravityRules', $AntigravityRules,
+        '-CopilotPolicy', $CopilotPolicy, '-CodexPolicy', $CodexPolicy, '-ClaudePolicy', $ClaudePolicy)
+    if ($PoliciesOnly) { $verification += '-PoliciesOnly' }
+    & pwsh @verification
+    if ($LASTEXITCODE -ne 0) { throw 'Synchronization verification failed; no commit was made.' }
+
+    $commitPaths = @('antigravity/policies', 'copilot/policies', 'codex/policies', 'claude/policies')
+    if (-not $PoliciesOnly) {
+        $commitPaths += @('antigravity/skills', 'copilot/skills', 'codex/skills', 'claude/skills')
+    }
+    $commitPaths = @($commitPaths | Where-Object { Test-Path -LiteralPath (Join-Path $RepoRoot $_) })
+    git -C $RepoRoot diff --check -- @commitPaths
+    if ($LASTEXITCODE -ne 0) { throw 'Whitespace validation failed; no commit was made.' }
+    # Respect .gitignore and limit staging to the synchronization scope.
+    git -C $RepoRoot add -- @commitPaths
+    if ($LASTEXITCODE -ne 0) { throw 'Could not stage synchronized files.' }
+    git -C $RepoRoot diff --cached --check
+    if ($LASTEXITCODE -ne 0) { throw 'Staged validation failed; no commit was made.' }
+    git -C $RepoRoot diff --cached --quiet
+    $indexStatus = $LASTEXITCODE
+    if ($indexStatus -eq 0) {
+        Write-Output 'Synchronization complete; no changes to commit.'
+    } elseif ($indexStatus -eq 1) {
+        git -C $RepoRoot diff --cached --stat
+        git -C $RepoRoot commit -m 'chore(sync): synchronize shared skills and policies'
+        if ($LASTEXITCODE -ne 0) { throw 'Commit failed; synchronization is incomplete. Review the staged changes.' }
+        git -C $RepoRoot log -1 --format='%h %s'
+    } else {
+        throw 'Cannot inspect staged changes.'
+    }
+    git -C $RepoRoot status --short
+    if ($LASTEXITCODE -ne 0) { throw 'Post-commit status verification failed.' }
+}
