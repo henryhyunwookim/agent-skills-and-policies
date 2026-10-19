@@ -1,19 +1,24 @@
 <#
 .SYNOPSIS
-Audit or synchronize shared skills and global instructions for four agent harnesses.
+    Omnidirectional 4-way synchronization of agent skills and global policies across
+    Google Antigravity, GitHub Copilot, OpenAI Codex, and Claude Code.
 .EXAMPLE
-pwsh -File copilot/skills/sync-skills-and-policies/scripts/sync.ps1 -Check
+    pwsh -File copilot/skills/sync-skills-and-policies/scripts/sync.ps1 -Check
 .EXAMPLE
-pwsh -File copilot/skills/sync-skills-and-policies/scripts/sync.ps1 -Sync
+    pwsh -File copilot/skills/sync-skills-and-policies/scripts/sync.ps1 -Sync
 .EXAMPLE
-pwsh -File copilot/skills/sync-skills-and-policies/scripts/sync.ps1 -Sync -PoliciesOnly
+    pwsh -File copilot/skills/sync-skills-and-policies/scripts/sync.ps1 -Sync -PoliciesOnly
+.EXAMPLE
+    pwsh -File copilot/skills/sync-skills-and-policies/scripts/sync.ps1 -Sync -PoliciesOnly -PolicySource Claude
 #>
 [CmdletBinding(DefaultParameterSetName='Check')]
 param(
     [Parameter(ParameterSetName='Check')][switch]$Check,
     [Parameter(ParameterSetName='Sync')][switch]$Sync,
-    [ValidateSet('Antigravity','Repository')][string]$PolicySource = 'Antigravity',
+    [ValidateSet('Auto','Antigravity','Copilot','Codex','Claude','Repository')][string]$PolicySource = 'Auto',
+    [ValidateSet('Auto','Antigravity','Copilot','Codex','Claude')][string]$SkillSource = 'Auto',
     [switch]$PoliciesOnly,
+    [switch]$Force,
     [string]$RepoRoot,
     [string]$AntigravityPolicy = (Join-Path $HOME '.gemini/config/AGENTS.md'),
     [string]$AntigravityGemini = (Join-Path $HOME '.gemini/GEMINI.md'),
@@ -23,6 +28,7 @@ param(
     [string]$ClaudePolicy = (Join-Path $HOME '.claude/CLAUDE.md')
 )
 $ErrorActionPreference = 'Stop'
+
 if (-not $RepoRoot) {
     foreach ($startPath in @($PSScriptRoot, (Get-Location).Path)) {
         $candidate = $startPath
@@ -38,91 +44,65 @@ if (-not $RepoRoot) {
     }
     if (-not $RepoRoot) { throw 'Could not find repository root; pass -RepoRoot.' }
 }
-$legacy = Join-Path $PSScriptRoot 'sync_skills.ps1'
-$mirrors = Join-Path $PSScriptRoot 'sync-new-harnesses.ps1'
-$start = '<!-- shared-agent-policy:start -->'
-$end = '<!-- shared-agent-policy:end -->'
+
+$skillsScript = Join-Path $PSScriptRoot 'sync_skills.ps1'
+$startTag = '<!-- shared-agent-policy:start -->'
+$endTag = '<!-- shared-agent-policy:end -->'
 $policySnapshot = Join-Path $RepoRoot 'antigravity/policies'
 
-function Copy-PolicyFileIfChanged {
-    param([string]$Source, [string]$Destination)
-    if (-not (Test-Path -LiteralPath $Source)) { return }
-    $same = (Test-Path -LiteralPath $Destination) -and
-        (Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash
-    if (-not $same) {
-        New-Item -ItemType Directory -Path (Split-Path -Parent $Destination) -Force | Out-Null
-        Copy-Item -LiteralPath $Source -Destination $Destination -Force
+# ---------------------------------------------------------
+# Helper: Conflict Resolver Prompt
+# ---------------------------------------------------------
+function Resolve-HarnessChoice {
+    param(
+        [string]$ItemType,
+        [hashtable]$Candidates
+    )
+    Write-Host "`n========================================================" -ForegroundColor Yellow
+    Write-Host " [CONFLICT DETECTED] Divergent $ItemType detected across harnesses:" -ForegroundColor Yellow
+    Write-Host "========================================================" -ForegroundColor Yellow
+    $i = 1
+    $indexMap = @{}
+    foreach ($h in @('Antigravity', 'Copilot', 'Codex', 'Claude')) {
+        if ($Candidates.ContainsKey($h)) {
+            $info = $Candidates[$h]
+            Write-Host "  [$i] $h (Modified: $($info.Time))`n      Path: $($info.Path)" -ForegroundColor Cyan
+            $indexMap["$i"] = $h
+            $i++
+        }
+    }
+    Write-Host "  [S] Skip / Cancel" -ForegroundColor DarkGray
+
+    $isInteractive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
+    if (-not $isInteractive) {
+        $latest = ($Candidates.GetEnumerator() | Sort-Object { $_.Value.Time } -Descending | Select-Object -First 1).Key
+        Write-Warning "Non-interactive shell: resolving conflict by selecting latest modified harness ($latest)."
+        return $latest
+    }
+
+    while ($true) {
+        $selection = Read-Host "Select authoritative source [1-$($i-1)/S]"
+        $selection = if ($selection) { $selection.Trim() } else { '' }
+        if ($selection -eq 'S' -or $selection -eq 's') { return $null }
+        if ($indexMap.ContainsKey($selection)) {
+            return $indexMap[$selection]
+        }
+        Write-Host "Invalid selection. Please enter a number between 1 and $($i-1) or 'S' to skip." -ForegroundColor Red
     }
 }
 
-function Transfer-PolicySnapshot {
-    param([switch]$ToRepository)
-    $globalRules = $AntigravityRules
-    if ($ToRepository) {
-        Copy-PolicyFileIfChanged -Source $AntigravityPolicy -Destination (Join-Path $policySnapshot 'AGENTS.md')
-        if ((Test-Path -LiteralPath $AntigravityGemini) -and (Get-Item -LiteralPath $AntigravityGemini).Length -gt 0) {
-            Copy-PolicyFileIfChanged -Source $AntigravityGemini -Destination (Join-Path $policySnapshot 'GEMINI.md')
-        }
-        if (Test-Path -LiteralPath $AntigravityRules) {
-            foreach ($rule in (Get-ChildItem -LiteralPath $AntigravityRules -Filter '*.md' -File)) {
-                Copy-PolicyFileIfChanged -Source $rule.FullName -Destination (Join-Path $policySnapshot "rules/$($rule.Name)")
-            }
-        }
-    } else {
-        Copy-PolicyFileIfChanged -Source (Join-Path $policySnapshot 'AGENTS.md') -Destination $AntigravityPolicy
-        Copy-PolicyFileIfChanged -Source (Join-Path $policySnapshot 'GEMINI.md') -Destination $AntigravityGemini
-        $repoRules = Join-Path $policySnapshot 'rules'
-        if (Test-Path -LiteralPath $repoRules) {
-            foreach ($rule in (Get-ChildItem -LiteralPath $repoRules -Filter '*.md' -File)) {
-                Copy-PolicyFileIfChanged -Source $rule.FullName -Destination (Join-Path $globalRules $rule.Name)
-            }
-        }
+# ---------------------------------------------------------
+# Helper: Compile Antigravity policy into single shared string
+# ---------------------------------------------------------
+function Compile-AntigravityPolicy {
+    param([string]$AgentsFile, [string]$GeminiFile, [string]$RulesDir)
+    if (-not (Test-Path -LiteralPath $AgentsFile)) { return '' }
+    $parts = @([System.IO.File]::ReadAllText($AgentsFile).Replace("`r`n", "`n").Trim())
+    if ((Test-Path -LiteralPath $GeminiFile) -and (Get-Item -LiteralPath $GeminiFile).Length -gt 0) {
+        $parts += [System.IO.File]::ReadAllText($GeminiFile).Replace("`r`n", "`n").Trim()
     }
-}
-
-function Test-PolicySnapshot {
-    $drift = 0
-    if ($PolicySource -eq 'Repository') {
-        if (-not (Test-Path -LiteralPath (Join-Path $policySnapshot 'AGENTS.md'))) { throw 'Repository policy snapshot is missing AGENTS.md.' }
-        $files = @(Get-ChildItem -LiteralPath $policySnapshot -Filter '*.md' -File -Recurse)
-        foreach ($file in $files) {
-            $relative = $file.FullName.Substring($policySnapshot.Length).TrimStart('\', '/')
-            $target = if ($relative -eq 'AGENTS.md') { $AntigravityPolicy } elseif ($relative -eq 'GEMINI.md') { $AntigravityGemini } else { Join-Path $AntigravityRules $file.Name }
-            if (-not (Test-Path -LiteralPath $target) -or
-                (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash) {
-                Write-Host "Policy snapshot differs: $target"
-                $drift++
-            }
-        }
-    } else {
-        $files = @()
-        if (Test-Path -LiteralPath $AntigravityPolicy) { $files += Get-Item -LiteralPath $AntigravityPolicy }
-        if ((Test-Path -LiteralPath $AntigravityGemini) -and (Get-Item -LiteralPath $AntigravityGemini).Length -gt 0) { $files += Get-Item -LiteralPath $AntigravityGemini }
-        if (Test-Path -LiteralPath $AntigravityRules) { $files += @(Get-ChildItem -LiteralPath $AntigravityRules -Filter '*.md' -File) }
-        foreach ($file in $files) {
-            $target = if ($file.FullName -eq $AntigravityPolicy) { Join-Path $policySnapshot 'AGENTS.md' } elseif ($file.FullName -eq $AntigravityGemini) { Join-Path $policySnapshot 'GEMINI.md' } else { Join-Path $policySnapshot "rules/$($file.Name)" }
-            if (-not (Test-Path -LiteralPath $target) -or
-                (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash) {
-                Write-Host "Repository snapshot differs: $target"
-                $drift++
-            }
-        }
-    }
-    return $drift
-}
-
-function Sync-Policies {
-    param([switch]$DryRun)
-    $sourcePolicy = if ($PolicySource -eq 'Repository') { Join-Path $policySnapshot 'AGENTS.md' } else { $AntigravityPolicy }
-    $sourceGemini = if ($PolicySource -eq 'Repository') { Join-Path $policySnapshot 'GEMINI.md' } else { $AntigravityGemini }
-    $sourceRules = if ($PolicySource -eq 'Repository') { Join-Path $policySnapshot 'rules' } else { $AntigravityRules }
-    if (-not (Test-Path -LiteralPath $sourcePolicy)) { throw "Policy source missing: $sourcePolicy" }
-    $parts = @([System.IO.File]::ReadAllText($sourcePolicy).Replace("`r`n", "`n").Trim())
-    if (Test-Path -LiteralPath $sourceGemini) {
-        $parts += [System.IO.File]::ReadAllText($sourceGemini).Replace("`r`n", "`n").Trim()
-    }
-    if (Test-Path -LiteralPath $sourceRules) {
-        foreach ($rule in (Get-ChildItem -LiteralPath $sourceRules -Filter '*.md' -File | Sort-Object Name)) {
+    if (Test-Path -LiteralPath $RulesDir) {
+        foreach ($rule in (Get-ChildItem -LiteralPath $RulesDir -Filter '*.md' -File | Sort-Object Name)) {
             $body = [System.IO.File]::ReadAllText($rule.FullName).Replace("`r`n", "`n").Trim()
             if ($body -match '(?s)^---\n(.*?)\n---\n(.*)$') {
                 $frontmatter = $Matches[1]
@@ -134,69 +114,252 @@ function Sync-Policies {
         }
     }
     $source = ($parts | Where-Object { $_ }) -join "`n`n"
-    if (-not $source) { throw 'Antigravity policy is empty; refusing to propagate it.' }
-    $source = $source.Replace('# Antigravity Global Agent Rules', '# Shared Global Agent Rules')
-    $managed = "$start`n$source`n$end"
-    $drift = 0
-    foreach ($pair in @(
-        @{ Global = $CopilotPolicy; Repo = (Join-Path $RepoRoot 'copilot/policies/copilot-instructions.md') },
-        @{ Global = $CodexPolicy; Repo = (Join-Path $RepoRoot 'codex/policies/AGENTS.md') },
-        @{ Global = $ClaudePolicy; Repo = (Join-Path $RepoRoot 'claude/policies/CLAUDE.md') }
-    )) {
-      foreach ($target in @($pair.Global, $pair.Repo)) {
-        $current = if (Test-Path -LiteralPath $target) { [System.IO.File]::ReadAllText($target).Replace("`r`n", "`n") } else { '' }
-        $begin = $current.IndexOf($start, [StringComparison]::Ordinal)
-        $finish = $current.IndexOf($end, [StringComparison]::Ordinal)
-        if (($begin -ge 0) -ne ($finish -ge 0)) { throw "Incomplete shared policy markers in $target" }
-        if ($begin -ge 0 -and $finish -lt $begin) { throw "Reversed shared policy markers in $target" }
-        if ($target -eq $pair.Repo) {
-            $next = $managed + "`n"
-        } elseif ($begin -ge 0) {
-            $finish += $end.Length
-            $next = $current.Substring(0, $begin) + $managed + $current.Substring($finish)
-        } elseif ($current.Trim()) {
-            $next = $current.TrimEnd() + "`n`n" + $managed + "`n"
-        } else {
-            $next = $managed + "`n"
-        }
-        if ($next -ne $current) {
-            $drift++
-            Write-Host "Policy differs: $target"
-            if (-not $DryRun) {
-                New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
-                [System.IO.File]::WriteAllText($target, $next, [System.Text.UTF8Encoding]::new($false))
-            }
-        }
-      }
-    }
-    return $drift
+    return $source.Replace('# Antigravity Global Agent Rules', '# Shared Global Agent Rules')
 }
 
-function Invoke-PolicySync {
+# ---------------------------------------------------------
+# Helper: Extract shared block from monolithic instruction file
+# ---------------------------------------------------------
+function Extract-MonolithicSharedPolicy {
+    param([string]$FilePath)
+    if (-not (Test-Path -LiteralPath $FilePath)) { return '' }
+    $raw = [System.IO.File]::ReadAllText($FilePath).Replace("`r`n", "`n")
+    $b = $raw.IndexOf($startTag, [StringComparison]::Ordinal)
+    $f = $raw.IndexOf($endTag, [StringComparison]::Ordinal)
+    if ($b -lt 0 -or $f -lt 0 -or $f -le $b) { return '' }
+    return $raw.Substring($b + $startTag.Length, $f - ($b + $startTag.Length)).Trim()
+}
+
+# ---------------------------------------------------------
+# Helper: Decompose shared string into Antigravity AGENTS + rules
+# ---------------------------------------------------------
+function Decompose-SharedPolicyToAntigravity {
+    param(
+        [string]$SharedPolicyText,
+        [string]$TargetAgentsPath,
+        [string]$TargetRulesDir
+    )
+    $cleanText = $SharedPolicyText.Replace("`r`n", "`n").Trim()
+    $sections = [System.Collections.Generic.List[string]]::new()
+    $currentSection = [System.Text.StringBuilder]::new()
+
+    foreach ($line in ($cleanText -split "`n")) {
+        if ($line -match '^#\s+' -and $currentSection.Length -gt 0) {
+            $sections.Add($currentSection.ToString().Trim())
+            $currentSection.Clear() | Out-Null
+        }
+        $currentSection.AppendLine($line) | Out-Null
+    }
+    if ($currentSection.Length -gt 0) {
+        $sections.Add($currentSection.ToString().Trim())
+    }
+
+    if ($sections.Count -gt 0) {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $TargetAgentsPath) -Force | Out-Null
+        $agentsBody = $sections[0].Replace('# Shared Global Agent Rules', '# Antigravity Global Agent Rules')
+        [System.IO.File]::WriteAllText($TargetAgentsPath, $agentsBody + "`n", [System.Text.UTF8Encoding]::new($false))
+    }
+
+    if (-not (Test-Path -LiteralPath $TargetRulesDir)) {
+        New-Item -ItemType Directory -Path $TargetRulesDir -Force | Out-Null
+    }
+
+    $knownRules = @{
+        'Root Directory Cleanliness'    = 'clean_root_directory.md'
+        'Never Store Testing'           = 'clean_test_artifacts.md'
+        'Cloud Deployment'              = 'cloud_deployments.md'
+        'GCP Resource & Cost Hygiene'   = 'gcp_resource_cost_hygiene.md'
+        'Git Commit Policy'             = 'git_commit_policy.md'
+        'Manual Edits Take Precedence'  = 'manual_edits.md'
+        'GitHub Repository Creation'    = 'workspace_github_sync.md'
+    }
+
+    for ($i = 1; $i -lt $sections.Count; $i++) {
+        $secText = $sections[$i]
+        $firstLine = ($secText -split "`n")[0]
+        $matchedFile = $null
+        foreach ($pattern in $knownRules.Keys) {
+            if ($firstLine -match [regex]::Escape($pattern)) {
+                $matchedFile = $knownRules[$pattern]
+                break
+            }
+        }
+        if (-not $matchedFile) {
+            $slug = ($firstLine -replace '^#\s*(Global Rule:\s*)?', '' -replace '[^a-zA-Z0-9]+', '_').Trim('_').ToLowerInvariant()
+            $matchedFile = "$slug.md"
+        }
+        $rulePath = Join-Path $TargetRulesDir $matchedFile
+        $ruleContent = "---`ntrigger: always_on`n---`n`n$secText`n"
+        [System.IO.File]::WriteAllText($rulePath, $ruleContent, [System.Text.UTF8Encoding]::new($false))
+    }
+}
+
+# ---------------------------------------------------------
+# Helper: Inject managed block into monolithic target file
+# ---------------------------------------------------------
+function Inject-MonolithicPolicy {
+    param([string]$FilePath, [string]$CompiledBlock)
+    $current = if (Test-Path -LiteralPath $FilePath) { [System.IO.File]::ReadAllText($FilePath).Replace("`r`n", "`n") } else { '' }
+    $b = $current.IndexOf($startTag, [StringComparison]::Ordinal)
+    $f = $current.IndexOf($endTag, [StringComparison]::Ordinal)
+    $managed = "$startTag`n$CompiledBlock`n$endTag"
+
+    if ($b -ge 0 -and $f -ge 0 -and $f -gt $b) {
+        $f += $endTag.Length
+        $next = $current.Substring(0, $b) + $managed + $current.Substring($f)
+    } elseif ($current.Trim()) {
+        $next = $current.TrimEnd() + "`n`n" + $managed + "`n"
+    } else {
+        $next = $managed + "`n"
+    }
+
+    if ($next -ne $current) {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $FilePath) -Force | Out-Null
+        [System.IO.File]::WriteAllText($FilePath, $next, [System.Text.UTF8Encoding]::new($false))
+        return $true
+    }
+    return $false
+}
+
+# ---------------------------------------------------------
+# Main Policy Sync Function (4-Way Peer)
+# ---------------------------------------------------------
+function Invoke-OmniPolicySync {
     param([switch]$DryRun)
-    $count = Sync-Policies -DryRun:$DryRun
-    Write-Output "Policy targets differing: $count"
-    if ($DryRun -and $count -gt 0) { $script:hasDrift = $true }
-}
 
-function Assert-NoWorkspaceConflicts {
-    foreach ($pair in @(
-        @{ Global = (Join-Path $HOME '.gemini/config/skills'); Repo = (Join-Path $RepoRoot 'antigravity/skills') },
-        @{ Global = (Join-Path $HOME '.agents/skills'); Repo = (Join-Path $RepoRoot 'copilot/skills') }
-    )) {
-        foreach ($file in (Get-ChildItem -LiteralPath $pair.Global -File -Recurse)) {
-            $relative = $file.FullName.Substring($pair.Global.Length).TrimStart('\', '/')
-            if ($relative -match '^sync-skills(-and-policies)?[\\/]' -or $relative -eq 'antigravity-sync-manifest.json') { continue }
-            $repoFile = Join-Path $pair.Repo $relative
-            if ((Test-Path -LiteralPath $repoFile) -and
-                (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $repoFile -Algorithm SHA256).Hash) {
-                throw "Global and repository versions differ: $relative. Reconcile them before -Sync, or use -PoliciesOnly -Sync."
+    # 1. Harvest shared policy text from all sources
+    $repoBaseline = Compile-AntigravityPolicy -AgentsFile (Join-Path $policySnapshot 'AGENTS.md') `
+                                            -GeminiFile (Join-Path $policySnapshot 'GEMINI.md') `
+                                            -RulesDir (Join-Path $policySnapshot 'rules')
+
+    $agyContent = Compile-AntigravityPolicy -AgentsFile $AntigravityPolicy -GeminiFile $AntigravityGemini -RulesDir $AntigravityRules
+    $copContent = Extract-MonolithicSharedPolicy -FilePath $CopilotPolicy
+    $cdxContent = Extract-MonolithicSharedPolicy -FilePath $CodexPolicy
+    $cldContent = Extract-MonolithicSharedPolicy -FilePath $ClaudePolicy
+
+    $harvested = @{
+        'Antigravity' = @{ Content = $agyContent; Path = $AntigravityPolicy; Time = $(if (Test-Path $AntigravityPolicy) { (Get-Item $AntigravityPolicy).LastWriteTime } else { [DateTime]::MinValue }) }
+        'Copilot'     = @{ Content = $copContent; Path = $CopilotPolicy;     Time = $(if (Test-Path $CopilotPolicy) { (Get-Item $CopilotPolicy).LastWriteTime } else { [DateTime]::MinValue }) }
+        'Codex'       = @{ Content = $cdxContent; Path = $CodexPolicy;       Time = $(if (Test-Path $CodexPolicy) { (Get-Item $CodexPolicy).LastWriteTime } else { [DateTime]::MinValue }) }
+        'Claude'      = @{ Content = $cldContent; Path = $ClaudePolicy;      Time = $(if (Test-Path $ClaudePolicy) { (Get-Item $ClaudePolicy).LastWriteTime } else { [DateTime]::MinValue }) }
+    }
+
+    $repoFiles = @(
+        @{ Harness = 'Copilot'; Path = (Join-Path $RepoRoot 'copilot/policies/copilot-instructions.md') },
+        @{ Harness = 'Codex';   Path = (Join-Path $RepoRoot 'codex/policies/AGENTS.md') },
+        @{ Harness = 'Claude';  Path = (Join-Path $RepoRoot 'claude/policies/CLAUDE.md') }
+    )
+
+    $differing = @{}
+    foreach ($h in $harvested.Keys) {
+        $c = $harvested[$h].Content
+        if ($c -and ($c.Trim() -ne $repoBaseline.Trim())) {
+            $differing[$h] = $harvested[$h]
+        }
+    }
+
+    $repoDrifts = 0
+    foreach ($rf in $repoFiles) {
+        $c = Extract-MonolithicSharedPolicy -FilePath $rf.Path
+        if ($c.Trim() -ne $repoBaseline.Trim()) {
+            $repoDrifts++
+            Write-Host "Repo policy differs: $($rf.Path)"
+        }
+    }
+
+    $globalDrifts = 0
+    foreach ($h in $harvested.Keys) {
+        if ($harvested[$h].Content.Trim() -ne $repoBaseline.Trim()) {
+            $globalDrifts++
+            Write-Host "Global policy differs: $($harvested[$h].Path)"
+        }
+    }
+
+    $totalDrift = $globalDrifts + $repoDrifts
+    Write-Host "Policy targets differing: $totalDrift"
+
+    if ($DryRun) {
+        if ($totalDrift -gt 0) { $script:hasDrift = $true }
+        return $totalDrift
+    }
+
+    if ($totalDrift -eq 0) { return 0 }
+
+    # 2. Determine authoritative source
+    $selectedSource = $PolicySource
+    if ($selectedSource -eq 'Auto') {
+        if ($differing.Count -eq 0) {
+            $selectedSource = 'Repository'
+        } elseif ($differing.Count -eq 1) {
+            $selectedSource = ($differing.Keys | Select-Object -First 1)
+            Write-Host "Auto-detected upstream policy author: $selectedSource" -ForegroundColor Green
+        } else {
+            $uniqueContents = @($differing.Values | ForEach-Object { $_.Content.Trim() } | Select-Object -Unique)
+            if ($uniqueContents.Count -eq 1) {
+                $selectedSource = ($differing.Keys | Select-Object -First 1)
+                Write-Host "Consensus policy change detected across: $($differing.Keys -join ', ')" -ForegroundColor Green
+            } else {
+                $selectedSource = Resolve-HarnessChoice -ItemType 'Policy' -Candidates $differing
+                if (-not $selectedSource) {
+                    throw 'Policy synchronization cancelled due to unresolved conflict.'
+                }
             }
         }
     }
+
+    Write-Host "Applying authoritative policy from: $selectedSource" -ForegroundColor Green
+
+    # 3. Obtain authoritative shared policy content
+    $authoritativeBlock = ''
+    if ($selectedSource -eq 'Repository') {
+        $authoritativeBlock = $repoBaseline
+    } elseif ($selectedSource -eq 'Antigravity') {
+        $authoritativeBlock = $agyContent
+        Copy-Item -LiteralPath $AntigravityPolicy -Destination (Join-Path $policySnapshot 'AGENTS.md') -Force
+        if ((Test-Path -LiteralPath $AntigravityGemini) -and (Get-Item -LiteralPath $AntigravityGemini).Length -gt 0) {
+            Copy-Item -LiteralPath $AntigravityGemini -Destination (Join-Path $policySnapshot 'GEMINI.md') -Force
+        }
+        if (Test-Path -LiteralPath $AntigravityRules) {
+            foreach ($r in (Get-ChildItem -LiteralPath $AntigravityRules -Filter '*.md' -File)) {
+                Copy-Item -LiteralPath $r.FullName -Destination (Join-Path $policySnapshot "rules/$($r.Name)") -Force
+            }
+        }
+    } else {
+        $authoritativeBlock = $harvested[$selectedSource].Content
+        Decompose-SharedPolicyToAntigravity -SharedPolicyText $authoritativeBlock `
+                                            -TargetAgentsPath (Join-Path $policySnapshot 'AGENTS.md') `
+                                            -TargetRulesDir (Join-Path $policySnapshot 'rules')
+        Decompose-SharedPolicyToAntigravity -SharedPolicyText $authoritativeBlock `
+                                            -TargetAgentsPath $AntigravityPolicy `
+                                            -TargetRulesDir $AntigravityRules
+    }
+
+    # 4. Propagate authoritative compiled block to all harnesses
+    Inject-MonolithicPolicy -FilePath $CopilotPolicy -CompiledBlock $authoritativeBlock | Out-Null
+    Inject-MonolithicPolicy -FilePath (Join-Path $RepoRoot 'copilot/policies/copilot-instructions.md') -CompiledBlock $authoritativeBlock | Out-Null
+
+    Inject-MonolithicPolicy -FilePath $CodexPolicy -CompiledBlock $authoritativeBlock | Out-Null
+    Inject-MonolithicPolicy -FilePath (Join-Path $RepoRoot 'codex/policies/AGENTS.md') -CompiledBlock $authoritativeBlock | Out-Null
+
+    Inject-MonolithicPolicy -FilePath $ClaudePolicy -CompiledBlock $authoritativeBlock | Out-Null
+    Inject-MonolithicPolicy -FilePath (Join-Path $RepoRoot 'claude/policies/CLAUDE.md') -CompiledBlock $authoritativeBlock | Out-Null
+
+    if ($selectedSource -eq 'Repository') {
+        Copy-Item -LiteralPath (Join-Path $policySnapshot 'AGENTS.md') -Destination $AntigravityPolicy -Force
+        if (Test-Path (Join-Path $policySnapshot 'GEMINI.md')) {
+            Copy-Item -LiteralPath (Join-Path $policySnapshot 'GEMINI.md') -Destination $AntigravityGemini -Force
+        }
+        if (Test-Path (Join-Path $policySnapshot 'rules')) {
+            foreach ($r in (Get-ChildItem -LiteralPath (Join-Path $policySnapshot 'rules') -Filter '*.md' -File)) {
+                Copy-Item -LiteralPath $r.FullName -Destination (Join-Path $AntigravityRules $r.Name) -Force
+            }
+        }
+    }
+
+    return 0
 }
 
-# Validate the commit target before changing any synchronized files.
+# --- Execution Gate ---
 if ($Sync) {
     foreach ($harness in @('antigravity', 'copilot', 'codex', 'claude')) {
         if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot $harness) -PathType Container)) {
@@ -210,38 +373,35 @@ if ($Sync) {
     if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect the Git index.' }
     if ($staged.Count -gt 0) { throw 'Existing staged changes must be reconciled before synchronization.' }
 }
+
 $hasDrift = $false
+
+# Policy Sync Phase
 if ($PoliciesOnly -or $Sync -or $Check) {
-    if ($Sync) { Transfer-PolicySnapshot -ToRepository:($PolicySource -eq 'Antigravity') }
-    elseif ((Test-PolicySnapshot) -gt 0) { $hasDrift = $true }
-    Invoke-PolicySync -DryRun:(-not $Sync)
+    $script:policyDrift = Invoke-OmniPolicySync -DryRun:(-not $Sync)
 }
+
+# Skill Sync Phase (4-Way Peer)
 if (-not $PoliciesOnly) {
     if ($Sync) {
-        Assert-NoWorkspaceConflicts
-        & pwsh -NoProfile -File $legacy -SyncGlobal -RepoRoot $RepoRoot
-        if ($LASTEXITCODE -ne 0) { throw 'Antigravity/Copilot sync failed.' }
-        & pwsh -NoProfile -File $legacy -SyncWorkspace -RepoRoot $RepoRoot
-        if ($LASTEXITCODE -ne 0) { throw 'Antigravity/Copilot mirror sync failed.' }
-        & pwsh -NoProfile -File $mirrors -InstallGlobal -RepoRoot $RepoRoot
-        if ($LASTEXITCODE -ne 0) { throw 'Codex/Claude sync failed.' }
+        & pwsh -NoProfile -File $skillsScript -SyncGlobal -SyncWorkspace -RepoRoot $RepoRoot -SourceHarness $SkillSource -Force:$Force
+        if ($LASTEXITCODE -ne 0) { throw '4-way skill synchronization failed.' }
     } else {
-        try { Assert-NoWorkspaceConflicts } catch {
-            Write-Warning $_.Exception.Message
-            $hasDrift = $true
-        }
-        & pwsh -NoProfile -File $legacy -CheckOnly -ShowDiff -RepoRoot $RepoRoot
-        if ($LASTEXITCODE -ne 0) { $hasDrift = $true }
-        & pwsh -NoProfile -File $mirrors -Check -RepoRoot $RepoRoot
+        & pwsh -NoProfile -File $skillsScript -CheckOnly -ShowDiff -RepoRoot $RepoRoot -SourceHarness $SkillSource
         if ($LASTEXITCODE -ne 0) { $hasDrift = $true }
     }
 }
+
 if ($hasDrift) { exit 1 }
 
-# A successful -Sync includes verification and a local commit; -Check stays read-only.
+# Post-Sync Verification & Conventional Commit (when -Sync invoked)
 if ($Sync) {
+    Write-Host "`n========================================================" -ForegroundColor Cyan
+    Write-Host " [Step 3] Post-Synchronization Verification" -ForegroundColor Cyan
+    Write-Host "========================================================" -ForegroundColor Cyan
+
     $verification = @('-NoProfile', '-File', (Join-Path $PSScriptRoot 'sync.ps1'), '-Check', '-RepoRoot', $RepoRoot,
-        '-PolicySource', $PolicySource, '-AntigravityPolicy', $AntigravityPolicy,
+        '-PolicySource', 'Repository', '-AntigravityPolicy', $AntigravityPolicy,
         '-AntigravityGemini', $AntigravityGemini, '-AntigravityRules', $AntigravityRules,
         '-CopilotPolicy', $CopilotPolicy, '-CodexPolicy', $CodexPolicy, '-ClaudePolicy', $ClaudePolicy)
     if ($PoliciesOnly) { $verification += '-PoliciesOnly' }
@@ -255,18 +415,17 @@ if ($Sync) {
     $commitPaths = @($commitPaths | Where-Object { Test-Path -LiteralPath (Join-Path $RepoRoot $_) })
     git -C $RepoRoot diff --check -- @commitPaths
     if ($LASTEXITCODE -ne 0) { throw 'Whitespace validation failed; no commit was made.' }
-    # Respect .gitignore and limit staging to the synchronization scope.
+
     git -C $RepoRoot add -- @commitPaths
     if ($LASTEXITCODE -ne 0) { throw 'Could not stage synchronized files.' }
-    git -C $RepoRoot diff --cached --check
-    if ($LASTEXITCODE -ne 0) { throw 'Staged validation failed; no commit was made.' }
+
     git -C $RepoRoot diff --cached --quiet
     $indexStatus = $LASTEXITCODE
     if ($indexStatus -eq 0) {
         Write-Output 'Synchronization complete; no changes to commit.'
     } elseif ($indexStatus -eq 1) {
         git -C $RepoRoot diff --cached --stat
-        git -C $RepoRoot commit -m 'chore(sync): synchronize shared skills and policies'
+        git -C $RepoRoot commit -m 'chore(sync): synchronize shared skills and policies across 4 harnesses'
         if ($LASTEXITCODE -ne 0) { throw 'Commit failed; synchronization is incomplete. Review the staged changes.' }
         git -C $RepoRoot log -1 --format='%h %s'
     } else {

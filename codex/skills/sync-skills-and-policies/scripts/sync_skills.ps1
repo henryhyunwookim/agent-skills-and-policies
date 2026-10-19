@@ -1,52 +1,7 @@
 <#
 .SYNOPSIS
-    Synchronizes agent skills between Google Antigravity and GitHub Copilot global registries,
-    detects and reports differences before merging, and syncs workspace mirrors with actual global directories.
-
-.DESCRIPTION
-    Provides automated audit, diffing, transformation, and synchronization across:
-    1. Machine-global Antigravity skills (~/.gemini/config/skills)
-    2. Machine-global GitHub Copilot skills (~/.agents/skills)
-    3. Workspace repository mirrors (antigravity/skills and copilot/skills)
-
-    Ensures tool compatibility transformation (run_command <-> run_in_terminal, view_file <-> read_file),
-    normalizes paths, computes SHA-256 verification manifests, and generates clear unified diffs
-    whenever shared skills diverge between environments.
-
-.PARAMETER CheckOnly
-    Audits directories and outputs status without making any file modifications.
-
-.PARAMETER ShowDiff
-    Displays unified diffs for any shared skills that have diverged between Antigravity and Copilot.
-
-.PARAMETER SyncGlobal
-    Synchronizes global skills between Antigravity and Copilot roots.
-    If a shared skill has conflicting edits, it is skipped unless -Force is specified.
-
-.PARAMETER SyncWorkspace
-    Synchronizes this repository's antigravity/skills and copilot/skills folders
-    with the actual global directories on the local machine.
-
-.PARAMETER Direction
-    Direction for global sync: 'Both' (default), 'AgyToCop', or 'CopToAgy'.
-
-.PARAMETER TargetSkill
-    Limits audit or synchronization to a specific skill folder name.
-
-.PARAMETER Force
-    Allows overwriting divergent files during global sync without interactive prompt.
-
-.EXAMPLE
-    .\sync_skills.ps1 -CheckOnly -ShowDiff
-    Audits both global and workspace trees and displays diffs for any conflicting skills.
-
-.EXAMPLE
-    .\sync_skills.ps1 -SyncGlobal
-    Synchronizes additions between Antigravity and Copilot global registries.
-
-.EXAMPLE
-    .\sync_skills.ps1 -SyncWorkspace
-    Mirrors actual global skills into the workspace repository.
+    Omnidirectional 4-way synchronization of agent skills across Google Antigravity,
+    GitHub Copilot, OpenAI Codex, and Claude Code (Global registries & Repository mirrors).
 #>
 
 [CmdletBinding()]
@@ -55,18 +10,21 @@ param(
     [switch]$ShowDiff,
     [switch]$SyncGlobal,
     [switch]$SyncWorkspace,
-    [ValidateSet("Both", "AgyToCop", "CopToAgy")]
-    [string]$Direction = "Both",
+    [ValidateSet("Auto", "Antigravity", "Copilot", "Codex", "Claude")]
+    [string]$SourceHarness = "Auto",
     [string]$TargetSkill,
     [switch]$Force,
     [switch]$InstallToGlobal,
     [string]$AgyGlobal = (Join-Path $HOME ".gemini\config\skills"),
     [string]$CopGlobal = (Join-Path $HOME ".agents\skills"),
+    [string]$CdxGlobal = (Join-Path $HOME ".codex\skills"),
+    [string]$CldGlobal = (Join-Path $HOME ".claude\skills"),
     [string]$RepoRoot = $null
 )
 
 $ErrorActionPreference = "Stop"
 $PreservedWorkspaceSkills = @("sync-skills-and-policies")
+$ExcludedNames = @(".git", ".gitignore", "antigravity-sync-manifest.json", "sync-to-copilot.ps1")
 
 # Auto-detect repository root if not provided
 if (-not $RepoRoot) {
@@ -83,236 +41,125 @@ if (-not $RepoRoot) {
     }
 }
 
-$AgyRepo = Join-Path $RepoRoot "antigravity\skills"
-$CopRepo = Join-Path $RepoRoot "copilot\skills"
-$ExcludedNames = @(".git", ".gitignore", "antigravity-sync-manifest.json", "sync-to-copilot.ps1")
+$Harnesses = @(
+    @{ Name = "Antigravity"; Global = $AgyGlobal; Repo = (Join-Path $RepoRoot "antigravity\skills"); Style = "Antigravity" },
+    @{ Name = "Copilot";     Global = $CopGlobal; Repo = (Join-Path $RepoRoot "copilot\skills");     Style = "Copilot" },
+    @{ Name = "Codex";       Global = $CdxGlobal; Repo = (Join-Path $RepoRoot "codex\skills");       Style = "NeutralCodex" },
+    @{ Name = "Claude";      Global = $CldGlobal; Repo = (Join-Path $RepoRoot "claude\skills");      Style = "NeutralClaude" }
+)
 
 # ---------------------------------------------------------
-# Helper: Normalize markdown text for semantic comparison
+# Helper: Interactive / Non-Interactive Conflict Resolver
 # ---------------------------------------------------------
-function Normalize-MarkdownForComparison {
+function Resolve-HarnessConflict {
     param(
-        [Parameter(Mandatory=$true)]
-        [string]$Content,
-        [Parameter(Mandatory=$true)]
-        [ValidateSet("Agy", "Cop")]
-        [string]$SourceType
+        [string]$ItemType,
+        [string]$ItemName,
+        [hashtable]$Candidates
     )
+    Write-Host "`n========================================================" -ForegroundColor Yellow
+    Write-Host " [CONFLICT DETECTED] $ItemType '$ItemName' has divergent edits across harnesses:" -ForegroundColor Yellow
+    Write-Host "========================================================" -ForegroundColor Yellow
+    $i = 1
+    $indexMap = @{}
+    foreach ($h in @("Antigravity", "Copilot", "Codex", "Claude")) {
+        if ($Candidates.ContainsKey($h)) {
+            $info = $Candidates[$h]
+            Write-Host "  [$i] $h (Modified: $($info.Time))`n      Path: $($info.Path)" -ForegroundColor Cyan
+            $indexMap["$i"] = $h
+            $i++
+        }
+    }
+    Write-Host "  [S] Skip this $ItemType" -ForegroundColor DarkGray
+
+    $isInteractive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
+    if (-not $isInteractive) {
+        $latest = ($Candidates.GetEnumerator() | Sort-Object { $_.Value.Time } -Descending | Select-Object -First 1).Key
+        Write-Warning "Non-interactive shell: resolving conflict by selecting latest modified harness ($latest)."
+        return $latest
+    }
+
+    while ($true) {
+        $selection = Read-Host "Choose authoritative source [1-$($i-1)/S]"
+        $selection = if ($selection) { $selection.Trim() } else { "" }
+        if ($selection -eq "S" -or $selection -eq "s") { return $null }
+        if ($indexMap.ContainsKey($selection)) {
+            return $indexMap[$selection]
+        }
+        Write-Host "Invalid selection. Please enter a number between 1 and $($i-1) or 'S' to skip." -ForegroundColor Red
+    }
+}
+
+# ---------------------------------------------------------
+# Helper: Normalize content to canonical tokens for comparison
+# ---------------------------------------------------------
+function Normalize-SkillContentForComparison {
+    param([string]$Content)
     $text = $Content.Replace("`r`n", "`n").Trim()
-    if ($SourceType -eq "Cop") {
-        # Translate Copilot tools & specific script paths to Antigravity conventions for comparison
-        $text = $text.Replace("run_in_terminal", "run_command")
-        $text = $text.Replace("read_file", "view_file")
-        $text = $text.Replace(".agents\skills\sync-skills\scripts\sync_skills.ps1", ".gemini\config\skills\sync-skills\scripts\sync_skills.ps1")
-        $text = $text.Replace(".agents/skills/sync-skills/scripts/sync_skills.ps1", ".gemini/config/skills/sync-skills/scripts/sync_skills.ps1")
-        $text = $text.Replace(".agents\skills\sequential-image-extractor\scripts\sort_images.py", ".gemini\config\skills\sequential-image-extractor\scripts\sort_images.py")
-        $text = $text.Replace(".agents/skills/sequential-image-extractor/scripts/sort_images.py", ".gemini/config/skills/sequential-image-extractor/scripts/sort_images.py")
+
+    # Normalize tools
+    $text = $text.Replace("run_in_terminal", "__CMD_TOOL__")
+    $text = $text.Replace("the available terminal tool", "__CMD_TOOL__")
+    $text = $text.Replace("run_command", "__CMD_TOOL__")
+
+    $text = $text.Replace("read_file", "__VIEW_TOOL__")
+    $text = $text.Replace("the available file reader", "__VIEW_TOOL__")
+    $text = $text.Replace("view_file", "__VIEW_TOOL__")
+
+    # Normalize paths
+    $text = [System.Text.RegularExpressions.Regex]::Replace($text, '(?i)\.(gemini[\\/]config|agents|codex|claude)[\\/]skills', '__SKILLS_DIR__')
+    $text = [System.Text.RegularExpressions.Regex]::Replace($text, '(?i)(antigravity|copilot|codex|claude)[\\/]skills', '__REPO_SKILLS_DIR__')
+
+    return $text
+}
+
+# ---------------------------------------------------------
+# Helper: Transform content between harness styles
+# ---------------------------------------------------------
+function Transform-SkillContent {
+    param(
+        [string]$Content,
+        [string]$TargetStyle
+    )
+    $text = Normalize-SkillContentForComparison -Content $Content
+
+    switch ($TargetStyle) {
+        "Antigravity" {
+            $text = $text.Replace("__CMD_TOOL__", "run_command")
+            $text = $text.Replace("__VIEW_TOOL__", "view_file")
+            $text = $text.Replace("__SKILLS_DIR__", ".gemini/config/skills")
+            $text = $text.Replace("__REPO_SKILLS_DIR__", "antigravity/skills")
+        }
+        "Copilot" {
+            $text = $text.Replace("__CMD_TOOL__", "run_in_terminal")
+            $text = $text.Replace("__VIEW_TOOL__", "read_file")
+            $text = $text.Replace("__SKILLS_DIR__", ".agents/skills")
+            $text = $text.Replace("__REPO_SKILLS_DIR__", "copilot/skills")
+        }
+        "NeutralCodex" {
+            $text = $text.Replace("__CMD_TOOL__", "the available terminal tool")
+            $text = $text.Replace("__VIEW_TOOL__", "the available file reader")
+            $text = $text.Replace("__SKILLS_DIR__", ".codex/skills")
+            $text = $text.Replace("__REPO_SKILLS_DIR__", "codex/skills")
+        }
+        "NeutralClaude" {
+            $text = $text.Replace("__CMD_TOOL__", "the available terminal tool")
+            $text = $text.Replace("__VIEW_TOOL__", "the available file reader")
+            $text = $text.Replace("__SKILLS_DIR__", ".claude/skills")
+            $text = $text.Replace("__REPO_SKILLS_DIR__", "claude/skills")
+        }
     }
     return $text
 }
 
 # ---------------------------------------------------------
-# Helper: Transform content between environments
+# Helper: Copy skill folder with transformation
 # ---------------------------------------------------------
-function Transform-SkillFileContent {
+function Copy-SkillTreeOmni {
     param(
-        [Parameter(Mandatory=$true)]
-        [string]$Content,
-        [Parameter(Mandatory=$true)]
-        [ValidateSet("AgyToCop", "CopToAgy")]
-        [string]$Mode
-    )
-    $result = $Content
-    if ($Mode -eq "AgyToCop") {
-        $result = $result.Replace("run_command", "run_in_terminal")
-        $result = $result.Replace("view_file", "read_file")
-        $result = $result.Replace(".gemini\config\skills\sync-skills\scripts\sync_skills.ps1", ".agents\skills\sync-skills\scripts\sync_skills.ps1")
-        $result = $result.Replace(".gemini/config/skills/sync-skills/scripts/sync_skills.ps1", ".agents/skills/sync-skills/scripts/sync_skills.ps1")
-        $result = $result.Replace(".gemini\config\skills\sequential-image-extractor\scripts\sort_images.py", ".agents\skills\sequential-image-extractor\scripts\sort_images.py")
-        $result = $result.Replace(".gemini/config/skills/sequential-image-extractor/scripts/sort_images.py", ".agents/skills/sequential-image-extractor/scripts/sort_images.py")
-    } elseif ($Mode -eq "CopToAgy") {
-        $result = $result.Replace("run_in_terminal", "run_command")
-        $result = $result.Replace("read_file", "view_file")
-        $result = $result.Replace(".agents\skills\sync-skills\scripts\sync_skills.ps1", ".gemini\config\skills\sync-skills\scripts\sync_skills.ps1")
-        $result = $result.Replace(".agents/skills/sync-skills/scripts/sync_skills.ps1", ".gemini/config/skills/sync-skills/scripts/sync_skills.ps1")
-        $result = $result.Replace(".agents\skills\sequential-image-extractor\scripts\sort_images.py", ".gemini\config\skills\sequential-image-extractor\scripts\sort_images.py")
-        $result = $result.Replace(".agents/skills/sequential-image-extractor/scripts/sort_images.py", ".gemini/config/skills/sequential-image-extractor/scripts/sort_images.py")
-    }
-    return $result
-}
-
-# ---------------------------------------------------------
-# Task 1: Audit & Compare Global Skills
-# ---------------------------------------------------------
-function Audit-GlobalSkills {
-    Write-Host "`n========================================================" -ForegroundColor Cyan
-    Write-Host " [Step 1] Auditing Global Skills (Antigravity <-> Copilot)" -ForegroundColor Cyan
-    Write-Host "========================================================" -ForegroundColor Cyan
-    Write-Host "Antigravity Global Root : $AgyGlobal"
-    Write-Host "Copilot Global Root     : $CopGlobal"
-
-    if (-not (Test-Path $AgyGlobal)) {
-        Write-Error "Antigravity global directory not found: $AgyGlobal"
-        return $null
-    }
-    if (-not (Test-Path $CopGlobal)) {
-        Write-Error "Copilot global directory not found: $CopGlobal"
-        return $null
-    }
-
-    $agySkills = @(Get-ChildItem -LiteralPath $AgyGlobal -Directory | Select-Object -ExpandProperty Name)
-    $copSkills = @(Get-ChildItem -LiteralPath $CopGlobal -Directory | Select-Object -ExpandProperty Name)
-
-    if ($TargetSkill) {
-        $agySkills = @($agySkills | Where-Object { $_ -eq $TargetSkill })
-        $copSkills = @($copSkills | Where-Object { $_ -eq $TargetSkill })
-    }
-
-    $allSkills = @($agySkills + $copSkills) | Select-Object -Unique | Sort-Object
-
-    $shared = @()
-    $onlyAgy = @()
-    $onlyCop = @()
-
-    foreach ($s in $allSkills) {
-        $inAgy = $agySkills -contains $s
-        $inCop = $copSkills -contains $s
-        if ($inAgy -and $inCop) {
-            $shared += $s
-        } elseif ($inAgy) {
-            $onlyAgy += $s
-        } else {
-            $onlyCop += $s
-        }
-    }
-
-    Write-Host "`nSummary of Global Skills:" -ForegroundColor Gray
-    Write-Host "  Shared Skills       ($($shared.Count)) : $($shared -join ', ')" -ForegroundColor Green
-    Write-Host "  Only in Antigravity ($($onlyAgy.Count)) : $($onlyAgy -join ', ')" -ForegroundColor Yellow
-    Write-Host "  Only in Copilot     ($($onlyCop.Count)) : $($onlyCop -join ', ')" -ForegroundColor Yellow
-
-    $divergent = @{}
-
-    foreach ($s in $shared) {
-        $sAgyDir = Join-Path $AgyGlobal $s
-        $sCopDir = Join-Path $CopGlobal $s
-
-        $aFiles = Get-ChildItem -LiteralPath $sAgyDir -Recurse -File | Where-Object {
-            $ExcludedNames -notcontains $_.Name
-        }
-        $cFiles = Get-ChildItem -LiteralPath $sCopDir -Recurse -File | Where-Object {
-            $ExcludedNames -notcontains $_.Name
-        }
-
-        $skillDiffs = @()
-
-        foreach ($af in $aFiles) {
-            $rel = $af.FullName.Substring($sAgyDir.Length).TrimStart("\", "/")
-            $cfPath = Join-Path $sCopDir $rel
-
-            if (-not (Test-Path -LiteralPath $cfPath)) {
-                $skillDiffs += [PSCustomObject]@{
-                    Skill = $s
-                    RelativePath = $rel
-                    Status = "MissingInCopilot"
-                    AgyPath = $af.FullName
-                    CopPath = $cfPath
-                }
-            } else {
-                if ($af.Extension -eq ".md") {
-                    $aContent = Get-Content -LiteralPath $af.FullName -Raw
-                    $cContent = Get-Content -LiteralPath $cfPath -Raw
-                    $aNorm = Normalize-MarkdownForComparison -Content $aContent -SourceType "Agy"
-                    $cNorm = Normalize-MarkdownForComparison -Content $cContent -SourceType "Cop"
-                    if ($aNorm -ne $cNorm) {
-                        $skillDiffs += [PSCustomObject]@{
-                            Skill = $s
-                            RelativePath = $rel
-                            Status = "ContentDivergence"
-                            AgyPath = $af.FullName
-                            CopPath = $cfPath
-                        }
-                    }
-                } else {
-                    $aHash = (Get-FileHash -LiteralPath $af.FullName -Algorithm SHA256).Hash
-                    $cHash = (Get-FileHash -LiteralPath $cfPath -Algorithm SHA256).Hash
-                    if ($aHash -ne $cHash) {
-                        $skillDiffs += [PSCustomObject]@{
-                            Skill = $s
-                            RelativePath = $rel
-                            Status = "BinaryMismatch"
-                            AgyPath = $af.FullName
-                            CopPath = $cfPath
-                        }
-                    }
-                }
-            }
-        }
-
-        foreach ($cf in $cFiles) {
-            $rel = $cf.FullName.Substring($sCopDir.Length).TrimStart("\", "/")
-            $afPath = Join-Path $sAgyDir $rel
-            if (-not (Test-Path -LiteralPath $afPath)) {
-                $skillDiffs += [PSCustomObject]@{
-                    Skill = $s
-                    RelativePath = $rel
-                    Status = "MissingInAntigravity"
-                    AgyPath = $afPath
-                    CopPath = $cf.FullName
-                }
-            }
-        }
-
-        if ($skillDiffs.Count -gt 0) {
-            $divergent[$s] = $skillDiffs
-            Write-Host "`n  [DIFF DETECTED] Skill '$s' has differences between Antigravity and Copilot:" -ForegroundColor Yellow
-            foreach ($d in $skillDiffs) {
-                Write-Host "    - $($d.RelativePath) [$($d.Status)]" -ForegroundColor Red
-            }
-
-            if ($ShowDiff) {
-                foreach ($d in $skillDiffs) {
-                    if ($d.Status -eq "ContentDivergence") {
-                        Write-Host "`n    --- Diff for $($d.Skill)/$($d.RelativePath) ---" -ForegroundColor Cyan
-                        $tmpA = [System.IO.Path]::GetTempFileName()
-                        $tmpC = [System.IO.Path]::GetTempFileName()
-                        try {
-                            $aContent = Get-Content -LiteralPath $d.AgyPath -Raw
-                            $cContent = Get-Content -LiteralPath $d.CopPath -Raw
-                            Normalize-MarkdownForComparison -Content $aContent -SourceType "Agy" | Set-Content -LiteralPath $tmpA -Encoding utf8NoBOM
-                            Normalize-MarkdownForComparison -Content $cContent -SourceType "Cop" | Set-Content -LiteralPath $tmpC -Encoding utf8NoBOM
-                            git diff --no-index --color=always "$tmpA" "$tmpC"
-                        } finally {
-                            Remove-Item -LiteralPath $tmpA, $tmpC -Force -ErrorAction SilentlyContinue
-                        }
-                    }
-                }
-            }
-        } else {
-            Write-Host "  [OK] Skill '$s' is in sync" -ForegroundColor Green
-        }
-    }
-
-    return @{
-        Shared = $shared
-        OnlyAgy = $onlyAgy
-        OnlyCop = $onlyCop
-        Divergent = $divergent
-    }
-}
-
-# ---------------------------------------------------------
-# Helper: Sync an individual skill from Source to Target
-# ---------------------------------------------------------
-function Copy-SkillTree {
-    param(
-        [Parameter(Mandatory=$true)]
         [string]$SourceDir,
-        [Parameter(Mandatory=$true)]
         [string]$TargetDir,
-        [Parameter(Mandatory=$true)]
-        [ValidateSet("AgyToCop", "CopToAgy", "Direct")]
-        [string]$Mode
+        [string]$TargetStyle
     )
     if (-not (Test-Path -LiteralPath $TargetDir)) {
         New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
@@ -330,12 +177,10 @@ function Copy-SkillTree {
             New-Item -ItemType Directory -Path $destDir -Force | Out-Null
         }
 
-        if ($Mode -eq "Direct") {
-            Copy-Item -LiteralPath $f.FullName -Destination $dest -Force
-        } elseif ($f.Extension -eq ".md") {
-            $raw = Get-Content -LiteralPath $f.FullName -Raw
-            $transformed = Transform-SkillFileContent -Content $raw -Mode $Mode
-            Set-Content -LiteralPath $dest -Value $transformed -Encoding utf8NoBOM
+        if ($f.Extension -eq ".md") {
+            $raw = [System.IO.File]::ReadAllText($f.FullName)
+            $transformed = Transform-SkillContent -Content $raw -TargetStyle $TargetStyle
+            [System.IO.File]::WriteAllText($dest, $transformed, [System.Text.UTF8Encoding]::new($false))
         } else {
             Copy-Item -LiteralPath $f.FullName -Destination $dest -Force
         }
@@ -343,279 +188,284 @@ function Copy-SkillTree {
 }
 
 # ---------------------------------------------------------
-# Task 1 Execution: Sync Global Skills
+# Task 1: Audit Global Skills Across All 4 Harnesses
 # ---------------------------------------------------------
-function Sync-GlobalSkills {
-    param($AuditResult)
-
+function Audit-GlobalSkillsOmni {
     Write-Host "`n========================================================" -ForegroundColor Cyan
-    Write-Host " [Step 1 Execution] Syncing Global Skills" -ForegroundColor Cyan
+    Write-Host " [Step 1] Auditing Global Skills (4-Way Peer Mesh)" -ForegroundColor Cyan
     Write-Host "========================================================" -ForegroundColor Cyan
 
-    # Check for divergence
-    if ($AuditResult.Divergent.Count -gt 0 -and -not $Force) {
-        Write-Warning "Divergence detected in $($AuditResult.Divergent.Count) shared skill(s). Skipping merge for conflicting skills until user reviews diffs."
-        Write-Host "Use -ShowDiff to review changes or -Force to overwrite." -ForegroundColor Yellow
-    }
-
-    # 1. Antigravity -> Copilot additions
-    if ($Direction -in @("Both", "AgyToCop")) {
-        foreach ($s in $AuditResult.OnlyAgy) {
-            Write-Host "Syncing Antigravity skill '$s' -> Copilot..." -ForegroundColor Green
-            $src = Join-Path $AgyGlobal $s
-            $tgt = Join-Path $CopGlobal $s
-            Copy-SkillTree -SourceDir $src -TargetDir $tgt -Mode "AgyToCop"
-        }
-    }
-
-    # 2. Copilot -> Antigravity additions
-    if ($Direction -in @("Both", "CopToAgy")) {
-        foreach ($s in $AuditResult.OnlyCop) {
-            Write-Host "Syncing Copilot skill '$s' -> Antigravity..." -ForegroundColor Green
-            $src = Join-Path $CopGlobal $s
-            $tgt = Join-Path $AgyGlobal $s
-            Copy-SkillTree -SourceDir $src -TargetDir $tgt -Mode "CopToAgy"
-        }
-    }
-
-    # 3. If Force is specified, overwrite divergent skills according to Direction
-    if ($Force -and $AuditResult.Divergent.Count -gt 0) {
-        foreach ($s in $AuditResult.Divergent.Keys) {
-            Write-Host "Forcing overwrite for divergent skill '$s' (Direction: $Direction)..." -ForegroundColor Magenta
-            if ($Direction -eq "AgyToCop") {
-                Copy-SkillTree -SourceDir (Join-Path $AgyGlobal $s) -TargetDir (Join-Path $CopGlobal $s) -Mode "AgyToCop"
-            } elseif ($Direction -eq "CopToAgy") {
-                Copy-SkillTree -SourceDir (Join-Path $CopGlobal $s) -TargetDir (Join-Path $AgyGlobal $s) -Mode "CopToAgy"
-            } else {
-                Write-Warning "Cannot force bidirectional sync on divergent skill '$s'. Specify -Direction AgyToCop or CopToAgy."
+    $allSkills = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($h in $Harnesses) {
+        if (Test-Path -LiteralPath $h.Global) {
+            foreach ($dir in (Get-ChildItem -LiteralPath $h.Global -Directory)) {
+                if ($dir.Name -notmatch '^\.') {
+                    $allSkills.Add($dir.Name) | Out-Null
+                }
             }
         }
     }
 
-    # 4. Update manifest in Copilot global
-    Update-SyncManifest -SourceRoot $AgyGlobal -TargetRoot $CopGlobal
-}
+    $skillList = @($allSkills) | Sort-Object
+    if ($TargetSkill) { $skillList = @($skillList | Where-Object { $_ -eq $TargetSkill }) }
 
-# ---------------------------------------------------------
-# Helper: Update antigravity-sync-manifest.json
-# ---------------------------------------------------------
-function Update-SyncManifest {
-    param(
-        [string]$SourceRoot,
-        [string]$TargetRoot
-    )
-    $manifestPath = Join-Path $TargetRoot "antigravity-sync-manifest.json"
-    $sourceFiles = Get-ChildItem -LiteralPath $SourceRoot -File -Recurse | Where-Object {
-        $rel = $_.FullName.Substring($SourceRoot.Length).TrimStart("\", "/")
-        $_.Name -ne "README.md" -and
-            $ExcludedNames -notcontains $_.Name -and
-            $rel -notmatch "^\.git[\\/]"
-    }
+    Write-Host "Total unique shared skills discovered: $($skillList.Count)" -ForegroundColor Gray
 
-    $entries = foreach ($sf in $sourceFiles) {
-        $rel = $sf.FullName.Substring($SourceRoot.Length).TrimStart("\", "/").Replace("\", "/")
-        [ordered]@{
-            path = $rel
-            source_sha256 = (Get-FileHash -LiteralPath $sf.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            copilot_path = $rel
+    $divergent = @{}
+    $missingMap = @{}
+    $inSync = @()
+
+    foreach ($s in $skillList) {
+        $presentIn = @()
+        $missingIn = @()
+        foreach ($h in $Harnesses) {
+            $skillPath = Join-Path $h.Global $s
+            if (Test-Path -LiteralPath $skillPath) {
+                $presentIn += $h
+            } else {
+                $missingIn += $h
+            }
+        }
+
+        if ($missingIn.Count -gt 0) {
+            $missingMap[$s] = @{ Present = $presentIn; Missing = $missingIn }
+        }
+
+        # Check content equality across present harnesses
+        if ($presentIn.Count -gt 1) {
+            $baseHarness = $presentIn[0]
+            $baseDir = Join-Path $baseHarness.Global $s
+            $baseFiles = Get-ChildItem -LiteralPath $baseDir -Recurse -File | Where-Object { $ExcludedNames -notcontains $_.Name }
+
+            $isSkillDivergent = $false
+
+            foreach ($otherHarness in $presentIn[1..($presentIn.Count - 1)]) {
+                $otherDir = Join-Path $otherHarness.Global $s
+                $otherFiles = Get-ChildItem -LiteralPath $otherDir -Recurse -File | Where-Object { $ExcludedNames -notcontains $_.Name }
+
+                if ($baseFiles.Count -ne $otherFiles.Count) {
+                    $isSkillDivergent = $true
+                } else {
+                    foreach ($bf in $baseFiles) {
+                        $rel = $bf.FullName.Substring($baseDir.Length).TrimStart("\", "/")
+                        $ofPath = Join-Path $otherDir $rel
+                        if (-not (Test-Path -LiteralPath $ofPath)) {
+                            $isSkillDivergent = $true
+                            break
+                        }
+                        if ($bf.Extension -eq ".md") {
+                            $bNorm = Normalize-SkillContentForComparison -Content ([System.IO.File]::ReadAllText($bf.FullName))
+                            $oNorm = Normalize-SkillContentForComparison -Content ([System.IO.File]::ReadAllText($ofPath))
+                            if ($bNorm -ne $oNorm) {
+                                $isSkillDivergent = $true
+                                break
+                            }
+                        } else {
+                            $bHash = (Get-FileHash -LiteralPath $bf.FullName -Algorithm SHA256).Hash
+                            $oHash = (Get-FileHash -LiteralPath $ofPath -Algorithm SHA256).Hash
+                            if ($bHash -ne $oHash) {
+                                $isSkillDivergent = $true
+                                break
+                            }
+                        }
+                    }
+                }
+                if ($isSkillDivergent) { break }
+            }
+
+            if ($isSkillDivergent) {
+                $cand = @{}
+                foreach ($h in $presentIn) {
+                    $hDir = Join-Path $h.Global $s
+                    $maxTime = (Get-ChildItem -LiteralPath $hDir -Recurse -File | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1).LastWriteTime
+                    $cand[$h.Name] = @{ Time = $maxTime; Path = $hDir; Harness = $h }
+                }
+                $divergent[$s] = $cand
+                Write-Host "  [DIFF DETECTED] Skill '$s' diverges across: $($presentIn.Name -join ', ')" -ForegroundColor Yellow
+            } else {
+                if ($missingIn.Count -eq 0) {
+                    Write-Host "  [OK] Skill '$s' is in sync across all 4 harnesses" -ForegroundColor Green
+                    $inSync += $s
+                } else {
+                    Write-Host "  [PARTIAL] Skill '$s' is in sync across ($($presentIn.Name -join ', ')), but missing in: $($missingIn.Name -join ', ')" -ForegroundColor Yellow
+                }
+            }
+        } elseif ($presentIn.Count -eq 1) {
+            Write-Host "  [NEW] Skill '$s' only exists in $($presentIn[0].Name)" -ForegroundColor Magenta
         }
     }
 
-    $manifest = [ordered]@{
-        format = 1
-        source = (Resolve-Path $SourceRoot).Path
-        target = (Resolve-Path $TargetRoot).Path
-        synced_at_utc = (Get-Date).ToUniversalTime().ToString("o")
-        compatibility = @{
-            "view_file" = "read_file"
-            "run_command" = "run_in_terminal"
-        }
-        files = @($entries)
+    return @{
+        Skills = $skillList
+        Divergent = $divergent
+        Missing = $missingMap
+        InSync = $inSync
     }
-
-    $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding utf8NoBOM
-    Write-Host "Updated sync manifest: $manifestPath" -ForegroundColor Green
 }
 
 # ---------------------------------------------------------
-# Task 2: Audit Workspace vs Actual Global Folders
+# Task 1 Execution: 4-Way Sync Global Skills
 # ---------------------------------------------------------
-function Audit-WorkspaceMirrors {
+function Sync-GlobalSkillsOmni {
+    param($AuditResult)
+
     Write-Host "`n========================================================" -ForegroundColor Cyan
-    Write-Host " [Step 2 Audit] Comparing Workspace Mirrors vs Global Folders" -ForegroundColor Cyan
+    Write-Host " [Step 1 Execution] Syncing Global Skills Across 4 Peers" -ForegroundColor Cyan
     Write-Host "========================================================" -ForegroundColor Cyan
 
-    function Compare-DirPair {
-        param([string]$GlobalDir, [string]$RepoDir, [string]$Title)
-        Write-Host "`n--- $Title ---" -ForegroundColor Gray
-        if (-not (Test-Path $RepoDir)) {
-            Write-Host "  Repo folder does not exist: $RepoDir" -ForegroundColor Red
-            return
+    # 1. Resolve Divergent Skills
+    foreach ($s in $AuditResult.Divergent.Keys) {
+        $cand = $AuditResult.Divergent[$s]
+        $selectedSource = if ($SourceHarness -ne "Auto" -and $cand.ContainsKey($SourceHarness)) {
+            $SourceHarness
+        } else {
+            Resolve-HarnessConflict -ItemType "Skill" -ItemName $s -Candidates $cand
         }
 
-        $gFiles = Get-ChildItem -LiteralPath $GlobalDir -Recurse -File | Where-Object {
-            $rel = $_.FullName.Substring($GlobalDir.Length).TrimStart("\", "/")
-            $rel -notmatch "^\.git[\\/]" -and $_.Name -ne 'antigravity-sync-manifest.json'
-        }
-        $rFiles = Get-ChildItem -LiteralPath $RepoDir -Recurse -File | Where-Object {
-            $rel = $_.FullName.Substring($RepoDir.Length).TrimStart("\", "/")
-            $rel -notmatch "^\.git[\\/]" -and $_.Name -ne 'antigravity-sync-manifest.json'
+        if (-not $selectedSource) {
+            Write-Warning "Skipped divergent skill '$s'."
+            continue
         }
 
-        $gRel = $gFiles | ForEach-Object { $_.FullName.Substring($GlobalDir.Length).TrimStart("\", "/").Replace("\", "/") }
-        $rRel = $rFiles | ForEach-Object { $_.FullName.Substring($RepoDir.Length).TrimStart("\", "/").Replace("\", "/") }
+        $sourceInfo = $cand[$selectedSource]
+        Write-Host "Propagating authoritative skill '$s' from $selectedSource to all other harnesses..." -ForegroundColor Green
 
-        $missingInRepo = $gRel | Where-Object { $rRel -notcontains $_ }
-        $extraInRepo = $rRel | Where-Object {
+        foreach ($h in $Harnesses) {
+            if ($h.Name -ne $selectedSource) {
+                $targetDir = Join-Path $h.Global $s
+                Copy-SkillTreeOmni -SourceDir $sourceInfo.Path -TargetDir $targetDir -TargetStyle $h.Style
+            }
+        }
+    }
+
+    # 2. Propagate Missing Skills
+    foreach ($s in $AuditResult.Missing.Keys) {
+        if ($AuditResult.Divergent.ContainsKey($s)) { continue }
+        $info = $AuditResult.Missing[$s]
+        $sourceHarness = $info.Present[0]
+        $sourceDir = Join-Path $sourceHarness.Global $s
+
+        Write-Host "Deploying skill '$s' from $($sourceHarness.Name) to: $($info.Missing.Name -join ', ')..." -ForegroundColor Green
+        foreach ($targetHarness in $info.Missing) {
+            $targetDir = Join-Path $targetHarness.Global $s
+            Copy-SkillTreeOmni -SourceDir $sourceDir -TargetDir $targetDir -TargetStyle $targetHarness.Style
+        }
+    }
+}
+
+# ---------------------------------------------------------
+# Task 2: Audit Workspace vs Global Across 4 Harnesses
+# ---------------------------------------------------------
+function Audit-WorkspaceMirrorsOmni {
+    Write-Host "`n========================================================" -ForegroundColor Cyan
+    Write-Host " [Step 2 Audit] Comparing Workspace Mirrors vs Global Roots (4 Harnesses)" -ForegroundColor Cyan
+    Write-Host "========================================================" -ForegroundColor Cyan
+
+    $totalDiffs = 0
+    foreach ($h in $Harnesses) {
+        Write-Host "`n--- $($h.Name) Global vs Repo ($($h.Repo)) ---" -ForegroundColor Gray
+        if (-not (Test-Path $h.Repo)) {
+            Write-Host "  Repo folder does not exist: $($h.Repo)" -ForegroundColor Red
+            $totalDiffs++
+            continue
+        }
+        if (-not (Test-Path $h.Global)) {
+            Write-Host "  Global folder does not exist: $($h.Global)" -ForegroundColor Red
+            $totalDiffs++
+            continue
+        }
+
+        $gFiles = Get-ChildItem -LiteralPath $h.Global -Recurse -File | Where-Object {
+            $rel = $_.FullName.Substring($h.Global.Length).TrimStart("\", "/")
+            $rel -notmatch "^\.git[\\/]" -and $rel -notmatch "^\.system[\\/]" -and $_.Name -ne 'antigravity-sync-manifest.json'
+        }
+        $rFiles = Get-ChildItem -LiteralPath $h.Repo -Recurse -File | Where-Object {
+            $rel = $_.FullName.Substring($h.Repo.Length).TrimStart("\", "/")
+            $rel -notmatch "^\.git[\\/]" -and $rel -notmatch "^\.system[\\/]" -and $_.Name -ne 'antigravity-sync-manifest.json'
+        }
+
+        $gRel = @($gFiles | ForEach-Object { $_.FullName.Substring($h.Global.Length).TrimStart("\", "/").Replace("\", "/") })
+        $rRel = @($rFiles | ForEach-Object { $_.FullName.Substring($h.Repo.Length).TrimStart("\", "/").Replace("\", "/") })
+
+        $missingInRepo = @($gRel | Where-Object { $rRel -notcontains $_ })
+        $extraInRepo = @($rRel | Where-Object {
             $r = $_
             $skillName = ($r -split "[\\/]")[0]
             $gRel -notcontains $r -and $PreservedWorkspaceSkills -notcontains $skillName
-        }
-        $common = $gRel | Where-Object { $rRel -contains $_ }
+        })
+        $common = @($gRel | Where-Object { $rRel -contains $_ })
 
         $modified = @()
         foreach ($f in $common) {
-            $gPath = Join-Path $GlobalDir $f
-            $rPath = Join-Path $RepoDir $f
-            $gHash = (Get-FileHash -LiteralPath $gPath -Algorithm SHA256).Hash
-            $rHash = (Get-FileHash -LiteralPath $rPath -Algorithm SHA256).Hash
-            if ($gHash -ne $rHash) {
+            $gPath = Join-Path $h.Global $f
+            $rPath = Join-Path $h.Repo $f
+            if ((Get-FileHash -LiteralPath $gPath -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $rPath -Algorithm SHA256).Hash) {
                 $modified += $f
             }
         }
 
-        if ($missingInRepo) {
-            Write-Host "  [+] Missing in Workspace Repo ($($missingInRepo.Count)): $($missingInRepo -join ', ')" -ForegroundColor Yellow
+        if ($missingInRepo.Count -gt 0) {
+            Write-Host "  [+] Missing in Repo ($($missingInRepo.Count)): $($missingInRepo -join ', ')" -ForegroundColor Yellow
+            $totalDiffs += $missingInRepo.Count
         }
-        if ($extraInRepo) {
-            Write-Host "  [-] Extra in Workspace Repo ($($extraInRepo.Count)): $($extraInRepo -join ', ')" -ForegroundColor Magenta
+        if ($extraInRepo.Count -gt 0) {
+            Write-Host "  [-] Extra in Repo ($($extraInRepo.Count)): $($extraInRepo -join ', ')" -ForegroundColor Magenta
+            $totalDiffs += $extraInRepo.Count
         }
-        if ($modified) {
-            Write-Host "  [~] Modified in Global vs Workspace ($($modified.Count)): $($modified -join ', ')" -ForegroundColor Cyan
+        if ($modified.Count -gt 0) {
+            Write-Host "  [~] Modified ($($modified.Count)): $($modified -join ', ')" -ForegroundColor Cyan
+            $totalDiffs += $modified.Count
         }
-        if (-not $missingInRepo -and -not $extraInRepo -and -not $modified) {
+        if ($missingInRepo.Count -eq 0 -and $extraInRepo.Count -eq 0 -and $modified.Count -eq 0) {
             Write-Host "  [OK] Workspace mirror is perfectly in sync ($($common.Count) files)" -ForegroundColor Green
         }
     }
-
-    Compare-DirPair -GlobalDir $AgyGlobal -RepoDir $AgyRepo -Title "Antigravity Global vs Repo antigravity/skills"
-    Compare-DirPair -GlobalDir $CopGlobal -RepoDir $CopRepo -Title "Copilot Global vs Repo copilot/skills"
+    return $totalDiffs
 }
 
 # ---------------------------------------------------------
-# Task 2: Sync Workspace Mirrors with Actual Global Folders
+# Task 2 Execution: Sync Workspace Mirrors
 # ---------------------------------------------------------
-function Sync-WorkspaceMirrors {
+function Sync-WorkspaceMirrorsOmni {
     Write-Host "`n========================================================" -ForegroundColor Cyan
     Write-Host " [Step 2 Execution] Syncing Workspace Folders with Actual Global Skills" -ForegroundColor Cyan
     Write-Host "========================================================" -ForegroundColor Cyan
-    Write-Host "Workspace Root           : $RepoRoot"
-    Write-Host "Repo .gemini/config/skills: $AgyRepo"
-    Write-Host "Repo .agents/skills       : $CopRepo"
 
-    if (-not (Test-Path $RepoRoot)) {
-        Write-Error "Workspace repository root not found: $RepoRoot"
-        return
-    }
-
-    # Optional: Install workspace skills to global first if requested
-    if ($InstallToGlobal) {
-        Write-Host "`nInstalling workspace skills to global registries..." -ForegroundColor Green
-        Copy-SkillTree -SourceDir (Join-Path $AgyRepo "sync-skills-and-policies") -TargetDir (Join-Path $AgyGlobal "sync-skills-and-policies") -Mode "Direct"
-        Copy-SkillTree -SourceDir (Join-Path $CopRepo "sync-skills-and-policies") -TargetDir (Join-Path $CopGlobal "sync-skills-and-policies") -Mode "Direct"
-        Write-Host "sync-skills installed to global registries." -ForegroundColor Green
-    }
-
-    # 1. Sync Antigravity Global -> Workspace .gemini/config/skills
-    Write-Host "`nSyncing Antigravity Global -> Workspace .gemini/config/skills..." -ForegroundColor Cyan
-    $agyGlobalFiles = Get-ChildItem -LiteralPath $AgyGlobal -Recurse -File | Where-Object {
-        $rel = $_.FullName.Substring($AgyGlobal.Length).TrimStart("\", "/")
-        $rel -notmatch "^\.git[\\/]"
-    }
-
-    foreach ($f in $agyGlobalFiles) {
-        $rel = $f.FullName.Substring($AgyGlobal.Length).TrimStart("\", "/")
-        $dest = Join-Path $AgyRepo $rel
-        $destDir = Split-Path -Parent $dest
-        if (-not (Test-Path -LiteralPath $destDir)) {
-            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+    foreach ($h in $Harnesses) {
+        if (-not (Test-Path -LiteralPath $h.Global)) { continue }
+        if (-not (Test-Path -LiteralPath $h.Repo)) {
+            New-Item -ItemType Directory -Path $h.Repo -Force | Out-Null
         }
-        Copy-Item -LiteralPath $f.FullName -Destination $dest -Force
-    }
 
-    # Clean up stale files in workspace .gemini/config/skills
-    $agyRepoFiles = Get-ChildItem -LiteralPath $AgyRepo -Recurse -File | Where-Object {
-        $rel = $_.FullName.Substring($AgyRepo.Length).TrimStart("\", "/")
-        $rel -notmatch "^\.git[\\/]" -and $_.Name -ne ".gitignore"
-    }
-    foreach ($rf in $agyRepoFiles) {
-        $rel = $rf.FullName.Substring($AgyRepo.Length).TrimStart("\", "/")
-        $skillName = ($rel -split "[\\/]")[0]
-        if ($PreservedWorkspaceSkills -contains $skillName) {
-            continue
-        }
-        $orig = Join-Path $AgyGlobal $rel
-        if (-not (Test-Path -LiteralPath $orig)) {
-            Write-Host "Removing stale workspace file: $rel" -ForegroundColor Magenta
-            Remove-Item -LiteralPath $rf.FullName -Force
+        $gSkills = Get-ChildItem -LiteralPath $h.Global -Directory | Where-Object { $_.Name -notmatch '^\.' }
+        foreach ($s in $gSkills) {
+            $srcDir = $s.FullName
+            $tgtDir = Join-Path $h.Repo $s.Name
+            Copy-SkillTreeOmni -SourceDir $srcDir -TargetDir $tgtDir -TargetStyle $h.Style
         }
     }
-
-    # 2. Sync Copilot Global -> Workspace .agents/skills
-    Write-Host "`nSyncing Copilot Global -> Workspace .agents/skills..." -ForegroundColor Cyan
-    $copGlobalFiles = Get-ChildItem -LiteralPath $CopGlobal -Recurse -File | Where-Object {
-        $rel = $_.FullName.Substring($CopGlobal.Length).TrimStart("\", "/")
-        $rel -notmatch "^\.git[\\/]" -and $_.Name -ne 'antigravity-sync-manifest.json'
-    }
-
-    foreach ($f in $copGlobalFiles) {
-        $rel = $f.FullName.Substring($CopGlobal.Length).TrimStart("\", "/")
-        $dest = Join-Path $CopRepo $rel
-        $destDir = Split-Path -Parent $dest
-        if (-not (Test-Path -LiteralPath $destDir)) {
-            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
-        }
-        Copy-Item -LiteralPath $f.FullName -Destination $dest -Force
-    }
-
-    # Clean up stale files in workspace .agents/skills
-    $copRepoFiles = Get-ChildItem -LiteralPath $CopRepo -Recurse -File | Where-Object {
-        $rel = $_.FullName.Substring($CopRepo.Length).TrimStart("\", "/")
-        $rel -notmatch "^\.git[\\/]" -and $_.Name -ne ".gitignore"
-    }
-    foreach ($rf in $copRepoFiles) {
-        $rel = $rf.FullName.Substring($CopRepo.Length).TrimStart("\", "/")
-        $skillName = ($rel -split "[\\/]")[0]
-        if ($PreservedWorkspaceSkills -contains $skillName) {
-            continue
-        }
-        $orig = Join-Path $CopGlobal $rel
-        if (-not (Test-Path -LiteralPath $orig)) {
-            Write-Host "Removing stale workspace file: $rel" -ForegroundColor Magenta
-            Remove-Item -LiteralPath $rf.FullName -Force
-        }
-    }
-
-    Write-Host "`nWorkspace mirror synchronization complete!" -ForegroundColor Green
-    Write-Host "Git status summary:" -ForegroundColor Gray
-    git -C $RepoRoot status --short
+    Write-Host "All 4 workspace repository mirrors updated from global skills." -ForegroundColor Green
 }
 
-# ---------------------------------------------------------
-# Main Controller Flow
-# ---------------------------------------------------------
-$audit = Audit-GlobalSkills
+# --- Main Entry Point ---
+$audit = Audit-GlobalSkillsOmni
+
+if ($SyncGlobal) {
+    Sync-GlobalSkillsOmni -AuditResult $audit
+}
+
+if ($SyncWorkspace) {
+    Sync-WorkspaceMirrorsOmni
+}
+
+$mirrorDiffs = Audit-WorkspaceMirrorsOmni
 
 if ($CheckOnly) {
-    Audit-WorkspaceMirrors
-    Write-Host "`n[CheckOnly Mode] Audit completed. No file modifications made." -ForegroundColor Cyan
-    exit 0
-}
-
-if ($SyncGlobal -or (-not $SyncWorkspace -and -not $CheckOnly)) {
-    Sync-GlobalSkills -AuditResult $audit
-}
-
-if ($SyncWorkspace -or (-not $SyncGlobal -and -not $CheckOnly)) {
-    Sync-WorkspaceMirrors
+    $driftCount = $audit.Divergent.Count + $audit.Missing.Count + $mirrorDiffs
+    if ($driftCount -gt 0) {
+        Write-Warning "Total skill drift items detected: $driftCount"
+        exit 1
+    } else {
+        Write-Host "`n[CheckOnly Mode] All 4 harnesses are 100% in sync." -ForegroundColor Green
+    }
 }

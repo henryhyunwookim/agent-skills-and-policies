@@ -21,37 +21,27 @@ All synchronization workflows are driven by PowerShell 7 (`pwsh`) from the repos
 
 ```mermaid
 flowchart TD
-    subgraph Upstream["Upstream Authoring (Antigravity & Copilot)"]
-        A1["Antigravity Global Rules\n(~/.gemini/config/rules/*.md + AGENTS.md)"]
-        S1["Antigravity Global Skills\n(~/.gemini/config/skills/)"]
-        S2["Copilot Global Skills\n(~/.agents/skills/)"]
+    subgraph Peers["4-Way Upstream Peers (Author Anywhere)"]
+        H_AGY["Google Antigravity\n(~/.gemini/config/ & antigravity/)"]
+        H_COP["GitHub Copilot\n(~/.agents/ & ~/.copilot/ & copilot/)"]
+        H_CDX["OpenAI Codex\n(~/.codex/ & codex/)"]
+        H_CLD["Claude Code\n(~/.claude/ & claude/)"]
     end
 
-    subgraph SyncScript["sync.ps1 Orchestration"]
-        P_Comp["Policy Compiler\n(AGENTS.md + always_on rules/*.md)"]
-        S_Reconcile["Skill Reconciler & Adapters\n(Tool call translation)"]
+    subgraph SyncEngine["sync.ps1 Omnidirectional Engine"]
+        Conflict["Conflict Resolver & Interactive Prompt\n([1] Antigravity [2] Copilot [3] Codex [4] Claude)"]
+        P_Engine["Section-Aware Policy Engine\n(Modular rules/*.md <---> Monolithic managed blocks)"]
+        S_Engine["4-Way Skill Normalizer & Translator\n(run_command <---> run_in_terminal <---> neutral)"]
     end
 
-    subgraph Repos["Version-Controlled Repository Mirrors"]
-        R_AGY["antigravity/ (skills + modular rules)"]
-        R_COP["copilot/ (skills + copilot-instructions.md)"]
-        R_CDX["codex/ (skills + AGENTS.md)"]
-        R_CLD["claude/ (skills + CLAUDE.md)"]
-    end
+    H_AGY <--> Conflict
+    H_COP <--> Conflict
+    H_CDX <--> Conflict
+    H_CLD <--> Conflict
 
-    subgraph Downstream["Global Harness Run-times"]
-        G_COP["~/.copilot/copilot-instructions.md"]
-        G_CDX["~/.codex/AGENTS.md"]
-        G_CLD["~/.claude/CLAUDE.md"]
-    end
-
-    A1 --> P_Comp
-    P_Comp -->|Mirror snapshot| R_AGY
-    P_Comp -->|Inject managed block| R_COP & R_CDX & R_CLD
-    P_Comp -->|Inject managed block| G_COP & G_CDX & G_CLD
-
-    S1 & S2 --> S_Reconcile
-    S_Reconcile --> R_AGY & R_COP & R_CDX & R_CLD
+    Conflict --> P_Engine & S_Engine
+    P_Engine --> H_AGY & H_COP & H_CDX & H_CLD
+    S_Engine --> H_AGY & H_COP & H_CDX & H_CLD
 ```
 
 ---
