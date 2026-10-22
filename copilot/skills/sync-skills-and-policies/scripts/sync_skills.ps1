@@ -149,7 +149,7 @@ function Transform-SkillContent {
             $text = $text.Replace("__REPO_SKILLS_DIR__", "claude/skills")
         }
     }
-    return $text
+    return $text.Trim() + "`n"
 }
 
 # ---------------------------------------------------------
@@ -377,11 +377,13 @@ function Audit-WorkspaceMirrorsOmni {
 
         $gFiles = Get-ChildItem -LiteralPath $h.Global -Recurse -File | Where-Object {
             $rel = $_.FullName.Substring($h.Global.Length).TrimStart("\", "/")
-            $rel -notmatch "^\.git[\\/]" -and $rel -notmatch "^\.system[\\/]" -and $_.Name -ne 'antigravity-sync-manifest.json'
+            $rel -notmatch "^\.git[\\/]" -and $rel -notmatch "^\.system[\\/]" -and $_.Name -ne 'antigravity-sync-manifest.json' -and
+            (-not $TargetSkill -or ($rel -split "[\\/]")[0] -eq $TargetSkill)
         }
         $rFiles = Get-ChildItem -LiteralPath $h.Repo -Recurse -File | Where-Object {
             $rel = $_.FullName.Substring($h.Repo.Length).TrimStart("\", "/")
-            $rel -notmatch "^\.git[\\/]" -and $rel -notmatch "^\.system[\\/]" -and $_.Name -ne 'antigravity-sync-manifest.json'
+            $rel -notmatch "^\.git[\\/]" -and $rel -notmatch "^\.system[\\/]" -and $_.Name -ne 'antigravity-sync-manifest.json' -and
+            (-not $TargetSkill -or ($rel -split "[\\/]")[0] -eq $TargetSkill)
         }
 
         $gRel = @($gFiles | ForEach-Object { $_.FullName.Substring($h.Global.Length).TrimStart("\", "/").Replace("\", "/") })
@@ -438,6 +440,9 @@ function Sync-WorkspaceMirrorsOmni {
         }
 
         $gSkills = Get-ChildItem -LiteralPath $h.Global -Directory | Where-Object { $_.Name -notmatch '^\.' }
+        if ($TargetSkill) {
+            $gSkills = @($gSkills | Where-Object { $_.Name -eq $TargetSkill })
+        }
         foreach ($s in $gSkills) {
             $srcDir = $s.FullName
             $tgtDir = Join-Path $h.Repo $s.Name

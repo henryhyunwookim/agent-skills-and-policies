@@ -17,6 +17,7 @@ param(
     [Parameter(ParameterSetName='Sync')][switch]$Sync,
     [ValidateSet('Auto','Antigravity','Copilot','Codex','Claude','Repository')][string]$PolicySource = 'Auto',
     [ValidateSet('Auto','Antigravity','Copilot','Codex','Claude')][string]$SkillSource = 'Auto',
+    [string]$TargetSkill,
     [switch]$PoliciesOnly,
     [switch]$Force,
     [string]$RepoRoot,
@@ -383,11 +384,16 @@ if ($PoliciesOnly -or $Sync -or $Check) {
 
 # Skill Sync Phase (4-Way Peer)
 if (-not $PoliciesOnly) {
+    $skillsArgs = @('-RepoRoot', $RepoRoot, '-SourceHarness', $SkillSource)
+    if ($TargetSkill) { $skillsArgs += @('-TargetSkill', $TargetSkill) }
     if ($Sync) {
-        & pwsh -NoProfile -File $skillsScript -SyncGlobal -SyncWorkspace -RepoRoot $RepoRoot -SourceHarness $SkillSource -Force:$Force
+        $skillsArgs += @('-SyncGlobal', '-SyncWorkspace')
+        if ($Force) { $skillsArgs += '-Force' }
+        & pwsh -NoProfile -File $skillsScript @skillsArgs
         if ($LASTEXITCODE -ne 0) { throw '4-way skill synchronization failed.' }
     } else {
-        & pwsh -NoProfile -File $skillsScript -CheckOnly -ShowDiff -RepoRoot $RepoRoot -SourceHarness $SkillSource
+        $skillsArgs += @('-CheckOnly', '-ShowDiff')
+        & pwsh -NoProfile -File $skillsScript @skillsArgs
         if ($LASTEXITCODE -ne 0) { $hasDrift = $true }
     }
 }
@@ -405,6 +411,7 @@ if ($Sync) {
         '-AntigravityGemini', $AntigravityGemini, '-AntigravityRules', $AntigravityRules,
         '-CopilotPolicy', $CopilotPolicy, '-CodexPolicy', $CodexPolicy, '-ClaudePolicy', $ClaudePolicy)
     if ($PoliciesOnly) { $verification += '-PoliciesOnly' }
+    if ($TargetSkill) { $verification += @('-TargetSkill', $TargetSkill) }
     & pwsh @verification
     if ($LASTEXITCODE -ne 0) { throw 'Synchronization verification failed; no commit was made.' }
 

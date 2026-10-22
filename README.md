@@ -66,12 +66,13 @@ Antigravity uses a modular structure with standalone rule files in [`antigravity
 
 ## Skills
 
-All seven shared skills are mirrored under each tool's `skills/` directory. Each skill contains a `SKILL.md` with YAML frontmatter (`name`, `description`) used by agent harnesses for on-demand discovery.
+All eight shared skills are mirrored under each tool's `skills/` directory. Each skill contains a `SKILL.md` with YAML frontmatter (`name`, `description`) used by agent harnesses for on-demand discovery.
 
 | Skill | Path | Purpose |
 | :--- | :--- | :--- |
 | **clone-github-repo** | [`copilot/skills/clone-github-repo/`](copilot/skills/clone-github-repo/SKILL.md) | Clone a Git or GitHub repository into the workspace, verify files, and inspect initial structure. |
 | **cloud-deploy** | [`copilot/skills/cloud-deploy/`](copilot/skills/cloud-deploy/SKILL.md) | Prepare, validate, and deploy applications to cloud hosting (defaults to GCP Cloud Run / Cloud Build). |
+| **create-github-repo** | [`copilot/skills/create-github-repo/`](copilot/skills/create-github-repo/SKILL.md) | Initialize Git, enforce .gitignore hygiene, create a remote GitHub repo, and push initial commits. |
 | **generate-workspace-readme** | [`copilot/skills/generate-workspace-readme/`](copilot/skills/generate-workspace-readme/SKILL.md) | Intelligently create or refresh production-grade `README.md` documentation tailored to the codebase. |
 | **safe-git-commit** | [`copilot/skills/safe-git-commit/`](copilot/skills/safe-git-commit/SKILL.md) | Review, audit working tree, enforce `.gitignore` hygiene, format conventional commits, and push cleanly. |
 | **sequential-image-extractor** | [`copilot/skills/sequential-image-extractor/`](copilot/skills/sequential-image-extractor/SKILL.md) | Extract text, tables, and code from numbered sequence images and compile structured summaries. |
